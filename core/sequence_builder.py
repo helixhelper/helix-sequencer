@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import traceback
 from pathlib import Path
 from typing import Iterable, Optional
@@ -95,14 +96,34 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
     
     Creates a RunConfig from engine_args, initializes a RunManager, and wraps
     the build logic with try/except to track success/failure.
+    
+    Args:
+        profile_id: Profile identifier (e.g., "master", "v27.3").
+        engine_args: CLI arguments to pass to the effect engine.
+    
+    Raises:
+        SystemExit: On configuration or runtime errors after logging details.
     """
-    profile = engine_profiles.resolve_profile(profile_id)
+    try:
+        profile = engine_profiles.resolve_profile(profile_id)
+    except ValueError as e:
+        print(f"ERROR: Invalid profile '{profile_id}': {e}", file=sys.stderr)
+        raise SystemExit(1)
     
     # Create RunConfig from engine arguments
-    config = RunConfig.from_engine_args(profile_id or "master", engine_args or [])
+    try:
+        config = RunConfig.from_engine_args(profile_id or "master", engine_args or [])
+    except (ValueError, TypeError) as e:
+        print(f"ERROR: Invalid arguments: {e}", file=sys.stderr)
+        print("Use --help for usage information.", file=sys.stderr)
+        raise SystemExit(1)
     
     # Initialize run manager
-    manager = RunManager(config)
+    try:
+        manager = RunManager(config)
+    except (OSError, IOError) as e:
+        print(f"ERROR: Failed to initialize run directory: {e}", file=sys.stderr)
+        raise SystemExit(1)
     
     try:
         report: EffectsOrchestrationRunReport | None = None
@@ -122,62 +143,114 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
         
         # Finalize with success
         manager.finalize(success=True)
+        print(f"SUCCESS: Run completed. Manifest: {manager.manifest_path}", file=sys.stderr)
+        
+    except KeyboardInterrupt:
+        error_summary = "Run interrupted by user (Ctrl+C)"
+        print(f"\nINTERRUPTED: {error_summary}", file=sys.stderr)
+        manager.finalize(success=False, error_summary=error_summary)
+        raise SystemExit(130)
         
     except Exception as e:
         error_summary = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-        print(f"ERROR: {error_summary}", flush=True)
+        print(f"ERROR: {error_summary}", file=sys.stderr)
+        print(f"Manifest saved to: {manager.manifest_path}", file=sys.stderr)
         manager.finalize(success=False, error_summary=error_summary)
-        raise
+        raise SystemExit(1)
 
 
 def run_version(version: str, engine_args: list[str] | None = None) -> None:
+    """Run a specific version profile."""
     run_profile(version, engine_args)
 
 
 def build_sequence_set(profiles: Iterable[str | None], engine_args: list[str] | None = None) -> None:
+    """Build sequences for multiple profiles."""
     for profile_id in profiles:
         run_profile(profile_id, engine_args)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Modular entrypoint for the xLights sequencing pipeline.")
-    parser.add_argument("--list-profiles", action="store_true", help="List active sequencing profiles and exit.")
-    parser.add_argument("--list-versions", action="store_true", help=argparse.SUPPRESS)
+    parser = argparse.ArgumentParser(
+        description="Helix Sequencer: Automated audio-to-light sequencing for xLights.",
+        epilog=(
+            "Engine arguments (after --): Passed directly to the effect engine.\n"
+            "  --no-effects-orchestrator: Skip orchestration pass.\n"
+            "  --promote-orchestrated-template: Use orchestrator output as input template.\n"
+            "  --no-orchestrator-template-promotion: Force sidecar-only behavior."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--list-profiles",
+        action="store_true",
+        help="List available profiles and exit.",
+    )
+    parser.add_argument(
+        "--list-versions",
+        action="store_true",
+        help=argparse.SUPPRESS,  # Hidden for backwards compatibility
+    )
     parser.add_argument(
         "--profile",
         action="append",
         dest="profiles",
-        help="Sequencing profile to run. Defaults to the active master profile.",
+        help="Profile to run (can specify multiple times). Defaults to active master profile.",
     )
-    parser.add_argument("--version-id", action="append", dest="profiles", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--version-id",
+        action="append",
+        dest="profiles",
+        help=argparse.SUPPRESS,  # Hidden for backwards compatibility
+    )
     parser.add_argument(
         "engine_args",
         nargs=argparse.REMAINDER,
-        help=(
-            "Arguments passed directly to the selected effect engine. "
-            "Use --no-effects-orchestrator to skip the canonical effects orchestrator. "
-            "Use --promote-orchestrated-template to feed the generated orchestrated XSQ back into the renderer, "
-            "or --no-orchestrator-template-promotion to force sidecar-only behavior."
-        ),
+        help="Arguments passed to the effect engine (after --).",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    """Main entrypoint with comprehensive error handling.
+    
+    Args:
+        argv: CLI arguments (uses sys.argv if not provided).
+    
+    Returns:
+        Exit code (0 for success, non-zero for errors).
+    """
+    try:
+        parser = build_parser()
+        args = parser.parse_args(argv)
 
-    if args.list_profiles or args.list_versions:
-        for profile in available_profiles():
-            print(f"{profile.profile_id}: {profile.title} [{profile.version}]")
+        if args.list_profiles or args.list_versions:
+            profiles = available_profiles()
+            if not profiles:
+                print("ERROR: No profiles available.", file=sys.stderr)
+                return 1
+            for profile in profiles:
+                print(f"{profile.profile_id}: {profile.title} [{profile.version}]")
+            return 0
+
+        profiles = args.profiles or [engine_profiles.ACTIVE_PROFILE_ID]
+        engine_args = list(args.engine_args)
+        if engine_args[:1] == ["--"]:
+            engine_args = engine_args[1:]
+        
+        build_sequence_set(profiles, engine_args)
         return 0
-
-    profiles = args.profiles or [engine_profiles.ACTIVE_PROFILE_ID]
-    engine_args = list(args.engine_args)
-    if engine_args[:1] == ["--"]:
-        engine_args = engine_args[1:]
-    build_sequence_set(profiles, engine_args)
-    return 0
+        
+    except SystemExit as e:
+        # Let SystemExit through (raised by run_profile or others)
+        return e.code if isinstance(e.code, int) else (1 if e.code else 0)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.", file=sys.stderr)
+        return 130
+    except Exception as e:
+        print(f"FATAL: {type(e).__name__}: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
