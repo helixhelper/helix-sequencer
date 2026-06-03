@@ -7,6 +7,6 @@ llvmlite>=0.42
 imageio>=2.34
 imageio-ffmpeg>=0.5
 Pillow>=10.2
-requests>=2.31
+requests>=2.34.2
 openai-whisper>=20240930
 pyinstaller>=6.10
