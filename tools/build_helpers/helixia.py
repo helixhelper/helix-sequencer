@@ -76,6 +76,11 @@ BAND_MODELS: dict[str, list[str]] = {
 }
 
 
+# Kept as a stable sidecar name so RunManager/GUI/beta artifacts can record
+# Helixia layout understanding without scraping the full manifest.
+LAYOUT_INTELLIGENCE_REPORT = "helixia_layout_intelligence.json"
+
+
 def _manifest() -> dict[str, Any]:
     return json.loads((COMMITTED_LAYOUT_DIR / "helixia_manifest.json").read_text(encoding="utf-8"))
 
@@ -175,10 +180,20 @@ def _layout_intelligence(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _write_notes(out_dir: Path, use_specs: bool) -> None:
-    notes = "Helixia layout scaffold generated.\nGenerated xlights_rgbeffects.xml contains deterministic placeholder models for Helixia v1.\n"
+    notes = (
+        "Helixia layout scaffold generated.\n"
+        "Generated xlights_rgbeffects.xml contains deterministic placeholder models for Helixia v1.\n"
+        f"Layout intelligence sidecar: {LAYOUT_INTELLIGENCE_REPORT}.\n"
+    )
     if use_specs:
         notes += "Helixville4 spec-driven snowman band models are enabled.\nBand background SVG assets were written to band_assets/.\n"
     (out_dir / "HELIXIA_LAYOUT_NOTES.txt").write_text(notes, encoding="utf-8")
+
+
+def _write_layout_intelligence_report(out_dir: Path, intelligence: dict[str, Any]) -> Path:
+    report_path = out_dir / LAYOUT_INTELLIGENCE_REPORT
+    report_path.write_text(json.dumps(intelligence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report_path
 
 
 def _add_band_specs(layout_path: Path) -> None:
@@ -230,7 +245,8 @@ def build_helixia_layout(
     payload["village_grid"]["rows"] = village_rows
     payload["village_grid"]["cols"] = village_cols
     payload["use_helixville4_band_model_specs"] = bool(use_helixville4_band_model_specs)
-    payload["layout_intelligence"] = _layout_intelligence(payload)
+    intelligence = _layout_intelligence(payload)
+    payload["layout_intelligence"] = intelligence
 
     if use_helixville4_band_model_specs:
         _add_band_specs(layout_path)
@@ -241,7 +257,9 @@ def build_helixia_layout(
     payload["xlights_layout"].update(counts)
     payload["xlights_layout"]["output_layout"] = str(layout_path)
     payload["xlights_layout"]["band_model_specs_enabled"] = bool(use_helixville4_band_model_specs)
+    payload["xlights_layout"]["layout_intelligence_report"] = str(out_dir / LAYOUT_INTELLIGENCE_REPORT)
 
     _write_notes(out_dir, bool(use_helixville4_band_model_specs))
+    _write_layout_intelligence_report(out_dir, intelligence)
     (out_dir / "helixia_manifest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload
