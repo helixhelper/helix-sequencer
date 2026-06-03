@@ -8,9 +8,11 @@ from core import engine_profiles
 from core.effects_orchestrator_bridge import EffectsOrchestrationRunReport, run_effects_orchestration
 
 NO_EFFECTS_ORCHESTRATOR_FLAG = "--no-effects-orchestrator"
+PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG = "--promote-orchestrated-template"
 NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG = "--no-orchestrator-template-promotion"
 ORCHESTRATOR_ONLY_FLAGS = {
     NO_EFFECTS_ORCHESTRATOR_FLAG,
+    PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG,
     NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG,
 }
 
@@ -36,9 +38,9 @@ def _orchestration_enabled(engine_args: list[str] | None) -> bool:
 
 def _orchestrator_template_promotion_enabled(engine_args: list[str] | None) -> bool:
     args = engine_args or []
-    if NO_EFFECTS_ORCHESTRATOR_FLAG in args:
+    if NO_EFFECTS_ORCHESTRATOR_FLAG in args or NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG in args:
         return False
-    return NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG not in args
+    return PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG in args
 
 
 def _clean_engine_args(engine_args: list[str] | None) -> list[str] | None:
@@ -69,12 +71,12 @@ def _promote_orchestrated_template(
     engine_args: list[str] | None,
     report: EffectsOrchestrationRunReport | None,
 ) -> list[str] | None:
-    """Feed orchestrated planning back into the canonical renderer path.
+    """Optionally feed orchestrated planning back into the canonical renderer path.
 
     The orchestrator writes an inspected `*.orchestrated.xsq` from the user-provided
-    template when possible. Passing that file as the next template means the normal
-    effect engine builds on top of the orchestrated native rows instead of leaving
-    them as a detached sidecar artifact.
+    template when possible. Promotion is intentionally explicit so the orchestrator
+    can remain on by default for reports/contracts while broad test runs and normal
+    sidecar users are not surprised by a generated template replacing their input.
     """
     cleaned = _clean_engine_args(engine_args)
     if not _orchestrator_template_promotion_enabled(engine_args):
@@ -125,8 +127,9 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=argparse.REMAINDER,
         help=(
             "Arguments passed directly to the selected effect engine. "
-            "Use --no-effects-orchestrator to skip the canonical effects orchestrator, "
-            "or --no-orchestrator-template-promotion to keep the orchestrated XSQ as a sidecar only."
+            "Use --no-effects-orchestrator to skip the canonical effects orchestrator. "
+            "Use --promote-orchestrated-template to feed the generated orchestrated XSQ back into the renderer, "
+            "or --no-orchestrator-template-promotion to force sidecar-only behavior."
         ),
     )
     return parser
