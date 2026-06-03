@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from core import model_parser as xmp
 from helix_layout.layout_health import build_layout_health_report
 from tools.build_helpers.helixia import (
+    LAYOUT_INTELLIGENCE_REPORT,
     MEGATREE_CONFIGS,
     NATIVE_XLIGHTS_MODEL_TYPES,
     build_helixia_layout,
@@ -81,6 +83,20 @@ class HelixiaLayoutTests(unittest.TestCase):
             self.assertIn("HELIXIA_STAGE", intelligence["required_groups"])
             self.assertIn("HX_LOT_SNOWMAN_BAND_STAGE", intelligence["required_groups"])
             self.assertIn("HX_LOT_DJ_RADIO_BOOTH", intelligence["required_groups"])
+
+    def test_layout_intelligence_sidecar_matches_manifest_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            payload = build_helixia_layout(out_dir, village_rows=3, village_cols=4)
+            report_path = out_dir / LAYOUT_INTELLIGENCE_REPORT
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+
+            self.assertTrue(report_path.exists())
+            self.assertEqual(report, payload["layout_intelligence"])
+            self.assertEqual(payload["xlights_layout"]["layout_intelligence_report"], str(report_path))
+            self.assertEqual(report["schema"], "helixia.layout_intelligence.v1")
+            self.assertIn("HX_SNOWMAN_DRUMMER_INSTRUMENT", report["performer_models"]["snowman_band"])
+            self.assertIn("HX_DJ_BOOTH", report["performer_models"]["cactus_tubeman"])
 
     def test_build_helixia_layout_writes_parseable_xlights_xml(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
