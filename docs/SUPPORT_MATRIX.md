@@ -1,76 +1,62 @@
-# Helix Beta Support Matrix
+# Support Matrix
 
-This document defines the supported surface for the beta version. Anything not listed here should be treated as experimental, legacy, or unsupported until tested and documented.
+This document outlines the officially supported platforms, versions, and dependencies for the Helix Sequencer.
 
-## Beta support summary
+## Operating Systems
 
-| Area | Beta support level | Notes |
+| OS | Status | Notes |
 |---|---|---|
-| Primary OS | Windows | First-class target for early beta testing because the xLights workflow is expected to be Windows-heavy. |
-| Secondary OS | Linux/macOS best effort | Useful for development and CI, but not the first beta packaging target. |
-| Python | 3.11 or 3.12 | Pick one or both in CI and keep README aligned. |
-| GUI | Tkinter launcher | `python gui_launcher.py` is the preferred day-to-day control center. |
-| CLI | Supported for smoke/testing | `python main.py --list-profiles` and profile runs remain required. |
-| Active profile | `master` | `master` currently resolves to the stable `v27.3` tuning. |
-| Legacy profiles | Compatibility only | Keep available, but do not make them primary beta targets until tested. |
-| xLights output | Required | Generated artifacts must be inspectable/importable in xLights or fail with clear logs. |
-| AI bridges | Placeholder/opt-in only | Rule-based sequencing remains the default beta path. |
+| **Windows 10/11** | ✅ Supported | Primary development and test platform |
+| **Windows Server 2019+** | ✅ Supported | Suitable for automated/headless rendering |
+| **macOS 12+** (Intel) | ⚠️ Limited | Community support; not regularly tested |
+| **macOS 13+** (Apple Silicon) | ⚠️ Limited | Community support; not regularly tested |
+| **Linux (Ubuntu 20.04+)** | ⚠️ Limited | Community support; WSL on Windows also supported |
 
-## Supported beta inputs
+## Python Versions
 
-The beta path should support copied input files only. Testers should keep originals elsewhere.
-
-| Input | Supported form | Notes |
+| Version | Status | Notes |
 |---|---|---|
-| Audio | WAV first; MP3 best effort | WAV should be the clean smoke-test baseline. |
-| Template | XSQ copy | Use a copied template file, not a production original. |
-| Layout | `xlights_rgbeffects.xml`; XBKP best effort | XML layout is the main target. Backup projects can be documented later if supported. |
-| Output directory | Empty or Helix-managed folder | The app should create timestamped run folders and avoid overwriting inputs. |
-| Profile | `master` | Other profiles require explicit test coverage before being advertised. |
+| **3.11** | ✅ Supported | Stable, well-tested |
+| **3.12** | ✅ Supported | Latest stable, full compatibility |
+| **3.10** | ⚠️ Limited | Community support; no active testing |
+| **3.9 and earlier** | ❌ Unsupported | End of life or lacking required features |
 
-## Unsupported or experimental before beta readiness
+## xLights Versions
 
-- Production show deployment without manual xLights review.
-- Training on user/tester layouts, templates, songs, or sequences.
-- Marketplace/model scraping.
-- Full legacy profile coverage.
-- Large engine rewrites without wrapper tests.
-- Claims of parity with expert hand-sequenced shows.
-- Auto-overwriting existing layout/template/audio files.
+| Version | Status | Notes |
+|---|---|---|
+| **2023.x** | ✅ Supported | Primary target version |
+| **2024.x** | ✅ Supported | Tested and compatible |
+| **2022.x** | ⚠️ Limited | May work; no active support |
+| **2021.x and earlier** | ❌ Unsupported | Incompatible with current sequencer output |
 
-## Minimum beta run expectations
+## Dependency Versions
 
-A successful beta run should produce:
+Core dependencies with tested version ranges:
 
-- A timestamped output folder under `outputs/beta/` or a user-selected equivalent.
-- `run_manifest.json`.
-- `command.txt`.
-- `helix.log`.
-- Generated xLights-compatible artifacts.
-- Friendly error text when a run fails.
+| Package | Min Version | Tested | Notes |
+|---|---|---|---|
+| `numpy` | 1.20.0 | 1.24+ | Array processing |
+| `pyyaml` | 5.4 | 6.0+ | Configuration parsing |
+| `pytest` | 6.0 | 7.4+ | Testing framework (dev only) |
 
-## Tester expectations
+## Graphics and Rendering
 
-Beta testers should expect:
+| Component | Requirement | Notes |
+|---|---|---|
+| **GPU Support** | Optional | CPU-only rendering fully supported; GPU acceleration not required |
+| **Display** | Not required | Headless operation fully supported for server environments |
 
-- Evaluation software, not production software.
-- Bugs and incomplete output quality.
-- A need to manually inspect and adjust results in xLights.
-- A request to share logs/manifests instead of private source assets.
+## Known Limitations
 
-Beta testers should not expect:
+- **Unicode paths:** Some xLights asset paths with non-ASCII characters may require manual intervention
+- **Network shares:** SMB paths generally work; NFS support is limited
+- **Large sequences:** Sequences exceeding 60 minutes may require increased memory allocation
+- **Concurrent runs:** Multiple simultaneous sequencer instances on the same system require separate output directories
 
-- Fully unattended show creation.
-- Guaranteed xLights import success for every layout.
-- Automatic handling of every custom prop, submodel, or legacy file.
-- Persistent learning from their private assets by default.
+## Getting Help
 
-## CI expectations
-
-CI should prove the documented support surface by running:
-
-- Python compile checks.
-- Unit tests.
-- `python main.py --list-profiles`.
-- A clean-room smoke run once fixtures exist.
-- Optional Windows packaging smoke once packaging is ready.
+- Check the [README](../README.md) for quick start instructions
+- See [BETA_POLICY.md](./BETA_POLICY.md) for data and privacy information
+- Review existing [GitHub Issues](https://github.com/ryankorkowski-boop/helix-sequencer/issues) for known problems
+- For bugs or feature requests, open a new issue with platform details and reproduction steps

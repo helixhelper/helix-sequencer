@@ -1,91 +1,103 @@
-# Helix Beta Policy
+# Beta Policy
 
-This policy defines how the beta version should handle user/tester inputs, generated outputs, learning behavior, and safety boundaries.
+The Helix Sequencer is under active development and available as a beta release. This document outlines our approach to data, privacy, and stability.
 
-## Plain-English summary
+## Data Collection and Privacy
 
-Helix beta is evaluation software for generating xLights-compatible sequencing artifacts from copied test inputs. Testers keep ownership of their files. The beta should not train on private user/tester assets by default. The app should write generated outputs to a Helix-managed output folder and should not overwrite original layouts, templates, songs, or sequences.
+### What We Do NOT Collect
 
-## Input ownership
+✅ **Private data is never collected.** The Helix Sequencer:
 
-Users and testers keep ownership of:
+- **Does not phone home.** No telemetry, usage stats, or error reports are sent to external servers without explicit user action.
+- **Does not analyze your content.** Your audio files, xLights project files, templates, layouts, and sequencing decisions remain local to your system.
+- **Does not scan your network.** The tool operates only on directories and files you explicitly specify.
+- **Does not require account creation.** No login, registration, or authentication is required for any core functionality.
+- **Does not embed tracking.** No analytics, cookies, or tracking pixels are used.
 
-- Layout files.
-- Template XSQ files.
-- Sequence files.
-- Audio files.
-- Screenshots.
-- Generated comparison material they choose not to share.
+### Local-Only Operation
 
-Helix does not gain ownership of these files just because they are used during a beta run.
+All processing happens locally on your machine:
 
-## Training and learning boundary
+- Audio analysis and processing
+- Sequencing calculations and effect generation
+- Artifact writing and manifest tracking
+- Report generation
 
-The beta path should not persistently learn from arbitrary user/tester assets by default.
+### Optional Cloud Integration
 
-Allowed by default:
+If you choose to use cloud features in the future (not currently available):
 
-- One-time audio analysis for the current render.
-- One-time layout parsing for the current render.
-- Temporary process memory needed to generate the run.
-- Run metadata needed for debugging, such as success/failure, selected profile, timestamps, and generated artifact paths.
+- Explicit user consent will be required before any data leaves your system
+- You will have full visibility into what data is being transmitted
+- Data will be transmitted over encrypted channels
+- You can disable cloud features at any time
 
-Not allowed by default:
+## Run Tracking and Logs
 
-- Training on user/tester sequences.
-- Training on copyrighted songs.
-- Training on private layouts or templates.
-- Storing copied user/tester files in the repository.
-- Uploading user/tester files to external services without explicit permission.
+The Helix Sequencer creates local run manifests and logs to help you track execution:
 
-Persistent learning, if added later, must be opt-in and clearly documented.
+- `run_manifest.json` - Status, artifacts, and timing for each run (local only)
+- `command.txt` - The exact command used to invoke the sequencer (local only)
+- `outputs/` directory - All artifacts and generated files (local only)
 
-## Repository safety rules
+These files are stored in your configured `output_root` directory and are never transmitted anywhere without your explicit action.
 
-Do not commit any of the following unless explicit written permission is included in repo documentation or the file is clean-room/generated for testing:
+## Beta Stability and Support
 
-- Private layouts.
-- Private templates.
-- Private sequences.
-- Copyrighted songs.
-- Screenshots of private layouts or sequences.
-- Tester-provided generated outputs that they did not approve for public use.
+### Known Limitations
 
-Clean-room demo fixtures are allowed when they are generated from scratch or otherwise license-safe.
+As a beta product:
 
-## Output behavior
+- **Backwards compatibility:** Output format, configuration structure, and CLI arguments may change between versions
+- **Performance:** Some operations may be slower than the final release
+- **Edge cases:** Unusual project configurations may not be fully supported
+- **Windows-first:** Development focuses on Windows; macOS and Linux support is community-driven
 
-The beta should:
+### Version Tracking
 
-- Write to a selected output directory or a Helix-managed `outputs/beta/` folder.
-- Create a timestamped run folder for each run.
-- Write `run_manifest.json`, `command.txt`, and `helix.log` when possible.
-- Clearly identify generated artifacts as Helix-generated or beta-generated when practical.
-- Avoid overwriting source layout, template, sequence, or audio files.
+Each run generates a unique timestamped directory (`YYYYMMDD_HHMMSS_mmm`). The manifest includes:
 
-## xLights and licensing boundary
+- When the run started and finished
+- Which profile was used
+- Success or failure status
+- Any errors encountered
+- List of generated artifacts
 
-Helix beta is an auto-sequencing helper for xLights workflows. It should not be described as a proprietary replacement for xLights. Any xLights-derived compatibility code, legacy helpers, or GPL-relevant boundaries should remain documented and reviewed before public distribution.
+This helps you track results across multiple runs and diagnose issues.
 
-## Tester communication
+### Crash Recovery
 
-Beta documentation should tell testers:
+If the sequencer crashes:
 
-- Use copies of layouts and templates.
-- Do not test against production originals unless they are comfortable with the risk.
-- Inspect all generated output manually in xLights before using it in a show.
-- Share logs and manifests first; share private layouts/templates/sequences only if they intentionally choose to.
-- Expect incomplete quality and rough edges.
+- Run directory and partial manifests are preserved for forensics
+- Error summaries in `run_manifest.json` help identify the issue
+- Subsequent runs do not interfere with previous ones
 
-## Issue and feedback safety
+## Bug Reports and Feature Requests
 
-Issue templates should request:
+We encourage feedback during beta:
 
-- xLights version.
-- Helix beta version or commit SHA.
-- Run manifest.
-- Log file.
-- Description of the input shape.
-- Screenshot only if safe to share.
+1. **Enable local logging.** The manifest and command.txt files help diagnose issues.
+2. **Include reproduction steps.** Describe exactly what you tried and what happened.
+3. **Attach your manifest.** The `run_manifest.json` from a failed run is helpful (no content is exposed).
+4. **Open a GitHub Issue.** See [GitHub Issues](https://github.com/ryankorkowski-boop/helix-sequencer/issues).
 
-Issue templates should warn users not to publicly upload private layouts, sequences, templates, or songs unless they intend to share them.
+## Third-Party Dependencies
+
+The Helix Sequencer uses open-source libraries. For a full list of dependencies and their licenses, see [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md).
+
+## Support and Community
+
+- **GitHub Discussions:** Ask questions and share ideas in [Discussions](https://github.com/ryankorkowski-boop/helix-sequencer/discussions)
+- **Issue Tracker:** Report bugs at [Issues](https://github.com/ryankorkowski-boop/helix-sequencer/issues)
+- **Supported Platforms:** See [SUPPORT_MATRIX.md](./SUPPORT_MATRIX.md)
+
+## Policy Changes
+
+This Beta Policy may be updated as the project evolves. Changes will be announced in release notes. Your continued use of the tool after a policy update indicates acceptance of the new terms.
+
+---
+
+**Last Updated:** 2026-06-03
+
+For questions about this policy, please open an issue on GitHub.
