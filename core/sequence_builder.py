@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import traceback
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from core import engine_profiles
 from core.effects_orchestrator_bridge import EffectsOrchestrationRunReport, run_effects_orchestration
+from core.run_config import RunConfig
+from core.run_manager import RunManager
 
 NO_EFFECTS_ORCHESTRATOR_FLAG = "--no-effects-orchestrator"
 PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG = "--promote-orchestrated-template"
@@ -88,18 +91,43 @@ def _promote_orchestrated_template(
 
 
 def run_profile(profile_id: str | None, engine_args: list[str] | None = None) -> None:
+    """Run a sequencing profile with integrated run tracking.
+    
+    Creates a RunConfig from engine_args, initializes a RunManager, and wraps
+    the build logic with try/except to track success/failure.
+    """
     profile = engine_profiles.resolve_profile(profile_id)
-    report: EffectsOrchestrationRunReport | None = None
-    if _orchestration_enabled(engine_args):
-        report = run_effects_orchestration(engine_args)
-        if report.invoked:
-            print(f"effects_orchestrator: invoked passes={len(report.passes)} report={report.report_path}")
-        else:
-            print(f"effects_orchestrator: unavailable error={report.error}")
-    effective_engine_args = _promote_orchestrated_template(engine_args, report)
-    if report is not None and report.invoked and report.xsq_written and effective_engine_args != _clean_engine_args(engine_args):
-        print(f"effects_orchestrator: promoted template={report.orchestrated_xsq_path}")
-    _effect_engine().main_for(profile.version, effective_engine_args)
+    
+    # Create RunConfig from engine arguments
+    config = RunConfig.from_engine_args(profile_id or "master", engine_args or [])
+    
+    # Initialize run manager
+    manager = RunManager(config)
+    
+    try:
+        report: EffectsOrchestrationRunReport | None = None
+        if _orchestration_enabled(engine_args):
+            report = run_effects_orchestration(engine_args)
+            if report.invoked:
+                print(f"effects_orchestrator: invoked passes={len(report.passes)} report={report.report_path}")
+            else:
+                print(f"effects_orchestrator: unavailable error={report.error}")
+        
+        effective_engine_args = _promote_orchestrated_template(engine_args, report)
+        if report is not None and report.invoked and report.xsq_written and effective_engine_args != _clean_engine_args(engine_args):
+            print(f"effects_orchestrator: promoted template={report.orchestrated_xsq_path}")
+        
+        # Run the effect engine
+        _effect_engine().main_for(profile.version, effective_engine_args)
+        
+        # Finalize with success
+        manager.finalize(success=True)
+        
+    except Exception as e:
+        error_summary = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+        print(f"ERROR: {error_summary}", flush=True)
+        manager.finalize(success=False, error_summary=error_summary)
+        raise
 
 
 def run_version(version: str, engine_args: list[str] | None = None) -> None:
