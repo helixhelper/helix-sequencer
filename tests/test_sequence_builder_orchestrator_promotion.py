@@ -28,7 +28,7 @@ def _report(*, invoked: bool = True, xsq_written: bool = True, path: str | None 
     )
 
 
-def test_run_profile_promotes_orchestrated_xsq_as_next_template(monkeypatch) -> None:
+def test_run_profile_keeps_orchestrated_xsq_as_sidecar_by_default(monkeypatch) -> None:
     fake_engine = _FakeEngine()
     monkeypatch.setattr(sequence_builder.engine_profiles, "resolve_profile", lambda profile_id: _profile())
     monkeypatch.setattr(sequence_builder, "_effect_engine", lambda: fake_engine)
@@ -42,12 +42,39 @@ def test_run_profile_promotes_orchestrated_xsq_as_next_template(monkeypatch) -> 
     assert fake_engine.calls == [
         (
             "v27.3",
+            ["--template", "template.xsq", "--audio", "song.mp3", "--output-dir", "out"],
+        )
+    ]
+
+
+def test_run_profile_promotes_orchestrated_xsq_as_next_template_when_requested(monkeypatch) -> None:
+    fake_engine = _FakeEngine()
+    monkeypatch.setattr(sequence_builder.engine_profiles, "resolve_profile", lambda profile_id: _profile())
+    monkeypatch.setattr(sequence_builder, "_effect_engine", lambda: fake_engine)
+    monkeypatch.setattr(sequence_builder, "run_effects_orchestration", lambda engine_args: _report())
+
+    sequence_builder.run_profile(
+        "master",
+        [
+            "--template",
+            "template.xsq",
+            "--audio",
+            "song.mp3",
+            "--output-dir",
+            "out",
+            "--promote-orchestrated-template",
+        ],
+    )
+
+    assert fake_engine.calls == [
+        (
+            "v27.3",
             ["--template", "out/song.orchestrated.xsq", "--audio", "song.mp3", "--output-dir", "out"],
         )
     ]
 
 
-def test_run_profile_can_keep_orchestrated_xsq_as_sidecar_only(monkeypatch) -> None:
+def test_run_profile_can_force_orchestrated_xsq_sidecar_only(monkeypatch) -> None:
     fake_engine = _FakeEngine()
     monkeypatch.setattr(sequence_builder.engine_profiles, "resolve_profile", lambda profile_id: _profile())
     monkeypatch.setattr(sequence_builder, "_effect_engine", lambda: fake_engine)
