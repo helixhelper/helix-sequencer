@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from core import engine_profiles
 from core.run_config import RunConfig
 
 
@@ -72,9 +71,8 @@ class RunContext:
         self._write_manifest()
 
     def _write_manifest(self) -> None:
-        if self._manager is None:
-            return
-        self._manager._write_manifest(self)
+        if self._manager is not None:
+            self._manager._write_manifest(self)
 
 
 class RunManager:
@@ -87,18 +85,17 @@ class RunManager:
         command: Sequence[str] | str,
         require_existing: bool = True,
     ) -> RunContext:
-        warnings = self.config.validate_inputs(require_existing=require_existing)
-        if warnings:
-            raise ValueError("; ".join(warnings))
+        validation_errors = self.config.validate_inputs(require_existing=require_existing)
+        if validation_errors:
+            raise ValueError("; ".join(validation_errors))
 
-        output_root = self.config.output_root
         run_id = _build_run_id(self.config.profile)
-        run_dir = _next_run_dir(output_root / "beta", run_id)
+        run_dir = _next_run_dir(self.config.output_root / "beta", run_id)
         run_dir.mkdir(parents=True, exist_ok=False)
 
         command_list = [command] if isinstance(command, str) else [str(part) for part in command]
         command_path = run_dir / "command.txt"
-        command_path.write_text(" ".join(command_list) + "\n", encoding="utf-8")
+        command_path.write_text(_format_command(command, command_list) + "\n", encoding="utf-8")
         log_path = run_dir / "helix.log"
         log_path.write_text("", encoding="utf-8")
 
@@ -109,7 +106,6 @@ class RunManager:
             manifest_path=run_dir / "run_manifest.json",
             command_path=command_path,
             log_path=log_path,
-            warnings=warnings,
             command=command_list,
             started_at=_now_iso(),
             _manager=self,
@@ -125,38 +121,17 @@ class RunManager:
 
 
 def _manifest_payload(ctx: RunContext) -> dict[str, object]:
-    profile = _profile_metadata(ctx.config.profile)
     return {
         "schema": MANIFEST_SCHEMA,
         "app": APP_NAME,
         "run_id": ctx.run_id,
         "profile": ctx.config.profile,
-        "engine_profile": profile.get("profile_id"),
-        "engine_version": profile.get("version"),
         "started_at": ctx.started_at,
         "finished_at": ctx.finished_at,
-        "timestamps": {
-            "started_at": ctx.started_at,
-            "finished_at": ctx.finished_at,
-        },
         "status": ctx.status,
         "audio_path": _path_or_none(ctx.config.audio_path),
         "template_path": _path_or_none(ctx.config.template_path),
         "layout_path": _path_or_none(ctx.config.layout_path),
-        "power_metadata_path": _path_or_none(ctx.config.power_metadata_path),
-        "inputs": {
-            "audio": _path_or_none(ctx.config.audio_path),
-            "template": _path_or_none(ctx.config.template_path),
-            "layout": _path_or_none(ctx.config.layout_path),
-            "power_metadata": _path_or_none(ctx.config.power_metadata_path),
-        },
-        "outputs": {
-            "output_root": str(ctx.config.output_root),
-            "run_dir": str(ctx.run_dir),
-            "manifest": str(ctx.manifest_path),
-            "command": str(ctx.command_path),
-            "log": str(ctx.log_path),
-        },
         "output_root": str(ctx.config.output_root),
         "run_dir": str(ctx.run_dir),
         "command": ctx.command,
@@ -169,19 +144,14 @@ def _manifest_payload(ctx: RunContext) -> dict[str, object]:
     }
 
 
-def _profile_metadata(profile_id: str) -> dict[str, str | None]:
-    try:
-        profile = engine_profiles.resolve_profile(profile_id)
-    except Exception:
-        return {"profile_id": profile_id, "version": None}
-    return {
-        "profile_id": getattr(profile, "profile_id", profile_id),
-        "version": getattr(profile, "version", None),
-    }
-
-
 def _path_or_none(path: Path | None) -> str | None:
     return str(path) if path is not None else None
+
+
+def _format_command(command: Sequence[str] | str, command_list: list[str]) -> str:
+    if isinstance(command, str):
+        return command
+    return subprocess.list2cmdline(command_list)
 
 
 def _build_run_id(profile: str) -> str:
@@ -215,6 +185,7 @@ def _git_commit() -> str | None:
         )
     except Exception:
         return None
+
     commit = result.stdout.strip()
     if result.returncode != 0:
         return None

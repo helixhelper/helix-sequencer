@@ -39,6 +39,7 @@ class RunConfig:
         index = 0
         while index < len(args):
             arg = args[index]
+            consumed = 1
 
             def value_after(flag: str) -> str | None:
                 if arg.startswith(f"{flag}="):
@@ -47,31 +48,9 @@ class RunConfig:
                     return args[index + 1]
                 return None
 
-            consumed = 1
             if (value := value_after("--template")) is not None:
                 template_path = Path(value)
                 consumed = 1 if arg.startswith("--template=") else 2
-            elif (value := value_after("--layout-file")) is not None:
-                layout_path = Path(value)
-                consumed = 1 if arg.startswith("--layout-file=") else 2
-            elif (value := value_after("--output-dir")) is not None:
-                output_root = Path(value)
-                consumed = 1 if arg.startswith("--output-dir=") else 2
-            elif (value := value_after("--variants")) is not None:
-                try:
-                    variants = int(value)
-                except ValueError:
-                    variants = 1
-                consumed = 1 if arg.startswith("--variants=") else 2
-            elif (value := value_after("--power-metadata-file")) is not None:
-                power_metadata_path = Path(value)
-                consumed = 1 if arg.startswith("--power-metadata-file=") else 2
-            elif (value := value_after("--controller-padding")) is not None:
-                try:
-                    controller_padding = int(value)
-                except ValueError:
-                    controller_padding = -1
-                consumed = 1 if arg.startswith("--controller-padding=") else 2
             elif arg == "--audio" or arg.startswith("--audio="):
                 if arg.startswith("--audio="):
                     value = arg.split("=", 1)[1]
@@ -86,15 +65,36 @@ class RunConfig:
                     if audio_values:
                         audio_path = Path(audio_values[0])
                     consumed = 1 + len(audio_values)
+            elif (value := value_after("--layout-file")) is not None:
+                layout_path = Path(value)
+                consumed = 1 if arg.startswith("--layout-file=") else 2
+            elif (value := value_after("--output-dir")) is not None:
+                output_root = Path(value)
+                consumed = 1 if arg.startswith("--output-dir=") else 2
+            elif (value := value_after("--variants")) is not None:
+                try:
+                    variants = int(value)
+                except ValueError:
+                    variants = 0
+                consumed = 1 if arg.startswith("--variants=") else 2
             elif arg == "--learning-memory":
                 enable_learning_memory = True
             elif arg == "--no-learning-memory":
                 enable_learning_memory = False
+            elif (value := value_after("--power-metadata-file")) is not None:
+                power_metadata_path = Path(value)
+                consumed = 1 if arg.startswith("--power-metadata-file=") else 2
             elif arg == "--autosize-controllers":
                 autosize_controllers = True
-            elif arg in {"--no-effects-orchestrator", "--no-orchestrator"}:
+            elif (value := value_after("--controller-padding")) is not None:
+                try:
+                    controller_padding = int(value)
+                except ValueError:
+                    controller_padding = -1
+                consumed = 1 if arg.startswith("--controller-padding=") else 2
+            elif arg == "--no-effects-orchestrator":
                 enable_orchestrator = False
-            elif arg in {"--no-orchestrator-template-promotion", "--no-promote-orchestrated-template"}:
+            elif arg == "--no-orchestrator-template-promotion":
                 promote_orchestrated_template = False
             else:
                 extra.append(arg)
@@ -128,12 +128,15 @@ class RunConfig:
         if self.output_root != Path("outputs"):
             args.extend(["--output-dir", str(self.output_root)])
         args.extend(["--variants", str(self.variants)])
+        if self.enable_learning_memory:
+            args.append("--learning-memory")
+        else:
+            args.append("--no-learning-memory")
         if self.power_metadata_path is not None:
             args.extend(["--power-metadata-file", str(self.power_metadata_path)])
         if self.autosize_controllers:
             args.append("--autosize-controllers")
         args.extend(["--controller-padding", str(self.controller_padding)])
-        args.append("--learning-memory" if self.enable_learning_memory else "--no-learning-memory")
         if not self.enable_orchestrator:
             args.append("--no-effects-orchestrator")
         if not self.promote_orchestrated_template:
@@ -144,30 +147,44 @@ class RunConfig:
     def validate_inputs(self, require_existing: bool = True) -> list[str]:
         errors: list[str] = []
         output_root = _safe_resolve(self.output_root)
+
         if self.variants < 1:
             errors.append(f"variants must be at least 1: {self.variants}")
         if self.controller_padding < 0:
             errors.append(f"controller_padding must be non-negative: {self.controller_padding}")
-        sources = (
+
+        for label, source in (
             ("audio", self.audio_path),
             ("template", self.template_path),
             ("layout", self.layout_path),
-        )
-
-        for label, source in sources:
+        ):
             if source is None:
                 continue
-            source_path = _safe_resolve(source)
-            if require_existing and not source.exists():
-                errors.append(f"{label} path does not exist: {source}")
-            if output_root == source_path:
-                errors.append(f"output_root must not equal {label} path: {source}")
-            if output_root == source_path.parent:
-                errors.append(f"output_root must not be the {label} source folder: {source_path.parent}")
-            if _is_relative_to(output_root, source_path):
-                errors.append(f"output_root must not be inside the {label} file path: {source}")
+            errors.extend(_validate_source_path(label, source, output_root, require_existing))
 
         return errors
+
+
+def _validate_source_path(label: str, source: Path, output_root: Path, require_existing: bool) -> list[str]:
+    errors: list[str] = []
+    source_path = _safe_resolve(source)
+
+    if require_existing:
+        if not source.exists():
+            errors.append(f"{label} path does not exist: {source}")
+        elif not source.is_file():
+            errors.append(f"{label} path is not a file: {source}")
+        elif not _is_readable(source):
+            errors.append(f"{label} path is not readable: {source}")
+
+    if output_root == source_path:
+        errors.append(f"output_root must not equal {label} path: {source}")
+    if output_root == source_path.parent:
+        errors.append(f"output_root must not be the {label} source folder: {source_path.parent}")
+    if _is_relative_to(output_root, source_path):
+        errors.append(f"output_root must not be inside the {label} file path: {source}")
+
+    return errors
 
 
 def _safe_resolve(path: Path) -> Path:
@@ -180,3 +197,11 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _is_readable(path: Path) -> bool:
+    try:
+        with path.open("rb"):
+            return True
+    except OSError:
+        return False
