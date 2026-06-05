@@ -8,12 +8,21 @@ from typing import Iterable, Optional
 
 from core import engine_profiles
 from core.effects_orchestrator_bridge import EffectsOrchestrationRunReport, run_effects_orchestration
+from core.prime_beat_grid import prime_beat_grid_args
 from core.run_config import RunConfig
 from core.run_manager import RunManager
 
 NO_EFFECTS_ORCHESTRATOR_FLAG = "--no-effects-orchestrator"
 PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG = "--promote-orchestrated-template"
 NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG = "--no-orchestrator-template-promotion"
+BEAT_GRID_FLAGS = {
+    "--snap-grid",
+    "--snap-bpm",
+    "--snap-offset-ms",
+    "--snap-mode",
+    "--snap-max-shift-ms",
+    "--no-snap",
+}
 ORCHESTRATOR_ONLY_FLAGS = {
     NO_EFFECTS_ORCHESTRATOR_FLAG,
     PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG,
@@ -22,9 +31,9 @@ ORCHESTRATOR_ONLY_FLAGS = {
 
 
 def _effect_engine():
-    from core import effect_engine
+    from core import effect_engine_beat_grid
 
-    return effect_engine
+    return effect_engine_beat_grid
 
 
 def available_profiles() -> list[engine_profiles.EngineProfile]:
@@ -51,6 +60,18 @@ def _clean_engine_args(engine_args: list[str] | None) -> list[str] | None:
     if engine_args is None:
         return None
     return [arg for arg in engine_args if arg not in ORCHESTRATOR_ONLY_FLAGS]
+
+
+def _has_explicit_beat_grid_args(engine_args: list[str] | None) -> bool:
+    return any(arg in BEAT_GRID_FLAGS for arg in (engine_args or []))
+
+
+def _apply_prime_beat_grid_defaults(profile_id_or_version: str | None, engine_args: list[str] | None) -> list[str] | None:
+    args = list(engine_args or [])
+    if _has_explicit_beat_grid_args(args):
+        return args
+    defaults = prime_beat_grid_args(profile_id_or_version=profile_id_or_version, engine_args=args, output_root=Path("."))
+    return defaults + args if defaults else args
 
 
 def _set_or_replace_arg(args: list[str], flag: str, value: str) -> list[str]:
@@ -109,6 +130,8 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
     except ValueError as e:
         print(f"ERROR: Invalid profile '{profile_id}': {e}", file=sys.stderr)
         raise SystemExit(1)
+
+    engine_args = _apply_prime_beat_grid_defaults(profile.version, engine_args)
     
     # Create RunConfig from engine arguments
     try:
@@ -177,7 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Engine arguments (after --): Passed directly to the effect engine.\n"
             "  --no-effects-orchestrator: Skip orchestration pass.\n"
             "  --promote-orchestrated-template: Use orchestrator output as input template.\n"
-            "  --no-orchestrator-template-promotion: Force sidecar-only behavior."
+            "  --no-orchestrator-template-promotion: Force sidecar-only behavior.\n"
+            "  --snap-grid 16: Snap timing to sixteenth-note grid.\n"
+            "  --no-snap: Disable Prime BeatGrid timing alignment."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
