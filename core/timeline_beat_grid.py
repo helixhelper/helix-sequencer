@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from core.beat_grid import BeatGrid, generate_beat_grid, snap_timing_events
 
@@ -79,4 +79,28 @@ def snap_lyric_timeline_to_grid(timeline: Any, beat_grid: BeatGrid, *, duration_
         summary["beat_grid_subdivision"] = beat_grid.subdivision
         summary["beat_grid_mode"] = beat_grid.mode
 
+    return timeline
+
+
+def build_lyric_timeline_with_grid(
+    lyric_events: Iterable[Any],
+    vocal_peaks_ms: Iterable[int] | None = None,
+    *,
+    beat_grid: BeatGrid | None = None,
+    snap_timing: bool = True,
+    duration_ms: int | None = None,
+) -> Any:
+    """Build a lyric timeline and optionally return it beat-grid aligned.
+
+    This is the opt-in activation path for Issue #41. The existing
+    ``core.vocal_timeline.build_lyric_timeline`` function remains unchanged for
+    legacy callers, while engine/CLI paths can switch to this wrapper to get
+    deterministic raw + snapped timing metadata.
+    """
+
+    from core.vocal_timeline import build_lyric_timeline
+
+    timeline = build_lyric_timeline(lyric_events, vocal_peaks_ms=vocal_peaks_ms)
+    if snap_timing and beat_grid is not None:
+        return snap_lyric_timeline_to_grid(timeline, beat_grid, duration_ms=duration_ms)
     return timeline
