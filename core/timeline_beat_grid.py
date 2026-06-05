@@ -82,6 +82,29 @@ def snap_lyric_timeline_to_grid(timeline: Any, beat_grid: BeatGrid, *, duration_
     return timeline
 
 
+def snap_song_parts_to_grid(song_parts: Iterable[Any], beat_grid: BeatGrid, *, duration_ms: int) -> list[Any]:
+    """Snap section boundaries such as verse, chorus, drop, bridge, and outro."""
+
+    return snap_timeline_items(list(song_parts or []), beat_grid, duration_ms=duration_ms, fallback_duration_ms=1)
+
+
+def snap_part_hits_to_grid(part_hits: Iterable[Any], beat_grid: BeatGrid, *, duration_ms: int) -> list[Any]:
+    """Snap one-shot events such as phrase hits, fills, releases, and crashes."""
+
+    hits = list(part_hits or [])
+    grid_points = generate_beat_grid(beat_grid, duration_ms)
+    raw_starts = [_start_ms(hit) for hit in hits]
+    snapped_starts = snap_timing_events(
+        raw_starts,
+        grid_points,
+        max_shift_ms=beat_grid.max_shift_ms,
+        mode=beat_grid.mode,
+    )
+    for hit, raw_start, snapped_start in zip(hits, raw_starts, snapped_starts):
+        _apply_start(hit, raw_start, snapped_start)
+    return hits
+
+
 def build_lyric_timeline_with_grid(
     lyric_events: Iterable[Any],
     vocal_peaks_ms: Iterable[int] | None = None,
