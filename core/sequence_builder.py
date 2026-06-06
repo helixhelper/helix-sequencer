@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Iterable
 
 from core import engine_profiles
 from core.effects_orchestrator_bridge import EffectsOrchestrationRunReport, run_effects_orchestration
 from core.run_config import RunConfig
+from core.run_manager import RunContext
 from core.run_manager import RunManager
 
 NO_EFFECTS_ORCHESTRATOR_FLAG = "--no-effects-orchestrator"
@@ -13,6 +15,19 @@ NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG = "--no-orchestrator-template-promotion"
 ORCHESTRATOR_ONLY_FLAGS = {
     NO_EFFECTS_ORCHESTRATOR_FLAG,
     NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG,
+}
+
+
+_ARTIFACT_KIND_BY_SUFFIX = {
+    ".xsq": "xsq",
+    ".fseq": "fseq",
+    ".report.json": "report",
+    ".sequence_notes.txt": "sequence_notes",
+    ".chronoflow.json": "chronoflow_json",
+    ".chronoflow.html": "chronoflow_html",
+    ".snowman_band.json": "snowman_band_json",
+    "placement_plan.json": "placement_plan",
+    "xlights_effect_contract.json": "xlights_effect_contract",
 }
 
 
@@ -119,9 +134,12 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
         effective_engine_args = _promote_orchestrated_template(engine_args, report)
         if report is not None and report.invoked and report.xsq_written and effective_engine_args != _clean_engine_args(engine_args):
             print(f"effects_orchestrator: promoted template={report.orchestrated_xsq_path}")
-        _effect_engine().main_for(profile.version, effective_engine_args)
-        ctx.record_artifact("configured_output_root", run_config.output_root)
-
+        artifact_snapshot = _snapshot_known_artifacts(_artifact_search_roots(run_config, profile.version))
+        try:
+            _effect_engine().main_for(profile.version, effective_engine_args)
+        finally:
+            _record_changed_artifacts(ctx, _artifact_search_roots(run_config, profile.version), artifact_snapshot)
+            ctx.record_artifact("configured_output_root", run_config.output_root)
 
 
 def run_version(version: str, engine_args: list[str] | None = None) -> None:
@@ -131,6 +149,76 @@ def run_version(version: str, engine_args: list[str] | None = None) -> None:
 def build_sequence_set(profiles: Iterable[str | None], engine_args: list[str] | None = None) -> None:
     for profile_id in profiles:
         run_profile(profile_id, engine_args)
+
+
+def _artifact_search_roots(config: RunConfig, version: str) -> list[Path]:
+    roots = [config.output_root]
+    if config.output_root == Path("outputs"):
+        family = version.split(".", 1)[0]
+        if family:
+            roots.append(Path(family))
+    return _unique_paths(roots)
+
+
+def _unique_paths(paths: Iterable[Path]) -> list[Path]:
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in paths:
+        resolved = path.resolve(strict=False)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append(path)
+    return unique
+
+
+def _snapshot_known_artifacts(roots: Iterable[Path]) -> dict[Path, tuple[int, int]]:
+    snapshot: dict[Path, tuple[int, int]] = {}
+    for artifact in _known_artifact_paths(roots):
+        try:
+            stat = artifact.stat()
+        except OSError:
+            continue
+        snapshot[artifact.resolve(strict=False)] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def _record_changed_artifacts(
+    ctx: RunContext,
+    roots: Iterable[Path],
+    before: dict[Path, tuple[int, int]],
+) -> None:
+    for artifact in _known_artifact_paths(roots):
+        resolved = artifact.resolve(strict=False)
+        try:
+            stat = artifact.stat()
+        except OSError:
+            continue
+        if before.get(resolved) == (stat.st_mtime_ns, stat.st_size):
+            continue
+        ctx.record_artifact(_artifact_kind(artifact), artifact)
+
+
+def _known_artifact_paths(roots: Iterable[Path]) -> list[Path]:
+    paths: list[Path] = []
+    for root in _unique_paths(roots):
+        if not root.exists():
+            continue
+        paths.extend(path for path in root.rglob("*") if path.is_file() and _is_known_artifact(path))
+    return sorted(paths, key=lambda path: str(path))
+
+
+def _is_known_artifact(path: Path) -> bool:
+    name = path.name
+    return any(name.endswith(suffix) for suffix in _ARTIFACT_KIND_BY_SUFFIX)
+
+
+def _artifact_kind(path: Path) -> str:
+    name = path.name
+    for suffix, kind in sorted(_ARTIFACT_KIND_BY_SUFFIX.items(), key=lambda item: len(item[0]), reverse=True):
+        if name.endswith(suffix):
+            return kind
+    return "artifact"
 
 
 def build_parser() -> argparse.ArgumentParser:
