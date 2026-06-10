@@ -112,16 +112,33 @@ def _promote_orchestrated_template(
     return _set_or_replace_arg(list(cleaned or []), "--template", promoted_template)
 
 
+def _record_orchestration_artifacts(manager: RunManager, report: EffectsOrchestrationRunReport | None) -> None:
+    if report is None:
+        return
+    artifact_paths = (
+        ("effects_orchestration_report", report.report_path),
+        ("placement_plan", report.placement_plan_path),
+        ("effect_contract", report.effect_contract_path),
+        ("orchestrated_xsq", report.orchestrated_xsq_path),
+        ("xsq_render_report", report.xsq_render_report_path),
+    )
+    for kind, path in artifact_paths:
+        if path:
+            manager.record_artifact(kind, Path(path))
+    if report.error:
+        manager.record_warning(f"effects_orchestrator: {report.error}")
+
+
 def run_profile(profile_id: str | None, engine_args: list[str] | None = None) -> None:
     """Run a sequencing profile with integrated run tracking.
-    
+
     Creates a RunConfig from engine_args, initializes a RunManager, and wraps
     the build logic with try/except to track success/failure.
-    
+
     Args:
         profile_id: Profile identifier (e.g., "master", "v27.3").
         engine_args: CLI arguments to pass to the effect engine.
-    
+
     Raises:
         SystemExit: On configuration or runtime errors after logging details.
     """
@@ -132,7 +149,7 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
         raise SystemExit(1)
 
     engine_args = _apply_prime_beat_grid_defaults(profile.version, engine_args)
-    
+
     # Create RunConfig from engine arguments
     try:
         config = RunConfig.from_engine_args(profile_id or "master", engine_args or [])
@@ -140,14 +157,14 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
         print(f"ERROR: Invalid arguments: {e}", file=sys.stderr)
         print("Use --help for usage information.", file=sys.stderr)
         raise SystemExit(1)
-    
+
     # Initialize run manager
     try:
         manager = RunManager(config)
     except (OSError, IOError) as e:
         print(f"ERROR: Failed to initialize run directory: {e}", file=sys.stderr)
         raise SystemExit(1)
-    
+
     try:
         report: EffectsOrchestrationRunReport | None = None
         if _orchestration_enabled(engine_args):
@@ -156,24 +173,25 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
                 print(f"effects_orchestrator: invoked passes={len(report.passes)} report={report.report_path}")
             else:
                 print(f"effects_orchestrator: unavailable error={report.error}")
-        
+            _record_orchestration_artifacts(manager, report)
+
         effective_engine_args = _promote_orchestrated_template(engine_args, report)
         if report is not None and report.invoked and report.xsq_written and effective_engine_args != _clean_engine_args(engine_args):
             print(f"effects_orchestrator: promoted template={report.orchestrated_xsq_path}")
-        
+
         # Run the effect engine
         _effect_engine().main_for(profile.version, effective_engine_args)
-        
+
         # Finalize with success
         manager.finalize(success=True)
         print(f"SUCCESS: Run completed. Manifest: {manager.manifest_path}", file=sys.stderr)
-        
+
     except KeyboardInterrupt:
         error_summary = "Run interrupted by user (Ctrl+C)"
         print(f"\nINTERRUPTED: {error_summary}", file=sys.stderr)
         manager.finalize(success=False, error_summary=error_summary)
         raise SystemExit(130)
-        
+
     except Exception as e:
         error_summary = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
         print(f"ERROR: {error_summary}", file=sys.stderr)
@@ -237,46 +255,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main entrypoint with comprehensive error handling.
-    
-    Args:
-        argv: CLI arguments (uses sys.argv if not provided).
-    
-    Returns:
-        Exit code (0 for success, non-zero for errors).
-    """
-    try:
-        parser = build_parser()
-        args = parser.parse_args(argv)
+    """Main entrypoint with comprehensive error handling."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-        if args.list_profiles or args.list_versions:
-            profiles = available_profiles()
-            if not profiles:
-                print("ERROR: No profiles available.", file=sys.stderr)
-                return 1
-            for profile in profiles:
-                print(f"{profile.profile_id}: {profile.title} [{profile.version}]")
-            return 0
-
-        profiles = args.profiles or [engine_profiles.ACTIVE_PROFILE_ID]
-        engine_args = list(args.engine_args)
-        if engine_args[:1] == ["--"]:
-            engine_args = engine_args[1:]
-        
-        build_sequence_set(profiles, engine_args)
+    if args.list_profiles or args.list_versions:
+        for profile in available_profiles():
+            print(f"{profile.version}\t{profile.label}\t{profile.description}")
         return 0
-        
-    except SystemExit as e:
-        # Let SystemExit through (raised by run_profile or others)
-        return e.code if isinstance(e.code, int) else (1 if e.code else 0)
-    except KeyboardInterrupt:
-        print("\nInterrupted by user.", file=sys.stderr)
-        return 130
-    except Exception as e:
-        print(f"FATAL: {type(e).__name__}: {e}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
-        return 1
 
+    profiles = args.profiles or [None]
+    engine_args = list(args.engine_args or [])
+    if engine_args and engine_args[0] == "--":
+        engine_args = engine_args[1:]
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+    build_sequence_set(profiles, engine_args)
+    return 0
