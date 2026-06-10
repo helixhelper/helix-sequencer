@@ -13,8 +13,9 @@ from typing import Optional
 @dataclass
 class RunConfig:
     """Runtime configuration for the Helix sequencer engine.
-    
-    Supports conversion to/from CLI arguments via engine_args.
+
+    Supports conversion to/from CLI arguments via engine_args while preserving
+    unknown arguments so the run spine can wrap the existing engine safely.
     """
 
     profile: str = "master"
@@ -32,130 +33,136 @@ class RunConfig:
     extra_engine_args: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_engine_args(cls, profile: str, engine_args: list[str]) -> RunConfig:
-        """Create RunConfig from CLI arguments.
-        
-        Args:
-            profile: The profile name (e.g. "master").
-            engine_args: List of CLI arguments to parse.
-        
-        Returns:
-            RunConfig instance with parsed arguments.
+    def from_engine_args(cls, profile: str, engine_args: list[str]) -> "RunConfig":
+        """Create RunConfig from existing engine CLI arguments.
+
+        Known legacy spellings and the canonical issue #79 spellings are both
+        accepted. Unknown flags are retained in ``extra_engine_args`` so visual
+        output behavior is not changed by introducing the run spine.
         """
         config = cls(profile=profile)
         extra_args: list[str] = []
-        
+
+        value_flags = {
+            "--audio": "audio_path",
+            "--audio-path": "audio_path",
+            "--audio_path": "audio_path",
+            "--template": "template_path",
+            "--template-path": "template_path",
+            "--template_path": "template_path",
+            "--layout": "layout_path",
+            "--layout-path": "layout_path",
+            "--layout_path": "layout_path",
+            "--output-dir": "output_root",
+            "--output-root": "output_root",
+            "--output_root": "output_root",
+            "--power-metadata": "power_metadata_path",
+            "--power-metadata-path": "power_metadata_path",
+            "--power_metadata_path": "power_metadata_path",
+        }
+        int_flags = {
+            "--variants": "variants",
+            "--controller-padding": "controller_padding",
+            "--controller_padding": "controller_padding",
+        }
+
         i = 0
         while i < len(engine_args):
             arg = engine_args[i]
-            
-            if arg == "--audio_path" and i + 1 < len(engine_args):
-                config.audio_path = Path(engine_args[i + 1])
+
+            if arg in value_flags and i + 1 < len(engine_args):
+                setattr(config, value_flags[arg], Path(engine_args[i + 1]))
                 i += 2
-            elif arg == "--template_path" and i + 1 < len(engine_args):
-                config.template_path = Path(engine_args[i + 1])
-                i += 2
-            elif arg == "--layout_path" and i + 1 < len(engine_args):
-                config.layout_path = Path(engine_args[i + 1])
-                i += 2
-            elif arg == "--output_root" and i + 1 < len(engine_args):
-                config.output_root = Path(engine_args[i + 1])
-                i += 2
-            elif arg == "--variants" and i + 1 < len(engine_args):
+            elif arg in int_flags and i + 1 < len(engine_args):
                 try:
-                    config.variants = int(engine_args[i + 1])
+                    setattr(config, int_flags[arg], int(engine_args[i + 1]))
                 except ValueError:
                     extra_args.extend([arg, engine_args[i + 1]])
                 i += 2
-            elif arg == "--enable_orchestrator":
+            elif arg in {"--enable-orchestrator", "--enable_orchestrator"}:
                 config.enable_orchestrator = True
                 i += 1
-            elif arg == "--disable_orchestrator":
+            elif arg in {"--disable-orchestrator", "--disable_orchestrator"}:
                 config.enable_orchestrator = False
                 i += 1
-            elif arg == "--promote_orchestrated_template":
+            elif arg in {"--promote-orchestrated-template", "--promote_orchestrated_template"}:
                 config.promote_orchestrated_template = True
                 i += 1
-            elif arg == "--no_promote_orchestrated_template":
+            elif arg in {"--no-promote-orchestrated-template", "--no_promote_orchestrated_template"}:
                 config.promote_orchestrated_template = False
                 i += 1
-            elif arg == "--enable_learning_memory":
+            elif arg in {"--enable-learning-memory", "--enable_learning_memory"}:
                 config.enable_learning_memory = True
                 i += 1
-            elif arg == "--disable_learning_memory":
+            elif arg in {"--disable-learning-memory", "--disable_learning_memory"}:
                 config.enable_learning_memory = False
                 i += 1
-            elif arg == "--power_metadata_path" and i + 1 < len(engine_args):
-                config.power_metadata_path = Path(engine_args[i + 1])
-                i += 2
-            elif arg == "--autosize_controllers":
+            elif arg in {"--autosize-controllers", "--autosize_controllers"}:
                 config.autosize_controllers = True
                 i += 1
-            elif arg == "--no_autosize_controllers":
+            elif arg in {"--no-autosize-controllers", "--no_autosize_controllers"}:
                 config.autosize_controllers = False
                 i += 1
-            elif arg == "--controller_padding" and i + 1 < len(engine_args):
-                try:
-                    config.controller_padding = int(engine_args[i + 1])
-                except ValueError:
-                    extra_args.extend([arg, engine_args[i + 1]])
-                i += 2
             else:
                 extra_args.append(arg)
                 i += 1
-        
+
         config.extra_engine_args = tuple(extra_args)
         return config
 
     def to_engine_args(self) -> list[str]:
-        """Convert RunConfig to CLI arguments.
-        
-        Returns:
-            List of CLI arguments ready for engine invocation.
-        """
+        """Convert RunConfig to canonical engine CLI arguments."""
         args: list[str] = []
-        
+
         if self.audio_path is not None:
-            args.extend(["--audio_path", str(self.audio_path)])
-        
+            args.extend(["--audio", str(self.audio_path)])
         if self.template_path is not None:
-            args.extend(["--template_path", str(self.template_path)])
-        
+            args.extend(["--template", str(self.template_path)])
         if self.layout_path is not None:
-            args.extend(["--layout_path", str(self.layout_path)])
-        
+            args.extend(["--layout", str(self.layout_path)])
         if self.output_root != Path("outputs"):
-            args.extend(["--output_root", str(self.output_root)])
-        
+            args.extend(["--output-dir", str(self.output_root)])
         if self.variants != 1:
             args.extend(["--variants", str(self.variants)])
-        
-        if self.enable_orchestrator:
-            args.append("--enable_orchestrator")
-        else:
-            args.append("--disable_orchestrator")
-        
-        if self.promote_orchestrated_template:
-            args.append("--promote_orchestrated_template")
-        else:
-            args.append("--no_promote_orchestrated_template")
-        
-        if self.enable_learning_memory:
-            args.append("--enable_learning_memory")
-        else:
-            args.append("--disable_learning_memory")
-        
+
+        args.append("--enable-orchestrator" if self.enable_orchestrator else "--disable-orchestrator")
+        args.append(
+            "--promote-orchestrated-template"
+            if self.promote_orchestrated_template
+            else "--no-promote-orchestrated-template"
+        )
+        args.append(
+            "--enable-learning-memory"
+            if self.enable_learning_memory
+            else "--disable-learning-memory"
+        )
+
         if self.power_metadata_path is not None:
-            args.extend(["--power_metadata_path", str(self.power_metadata_path)])
-        
-        if self.autosize_controllers:
-            args.append("--autosize_controllers")
-        else:
-            args.append("--no_autosize_controllers")
-        
+            args.extend(["--power-metadata", str(self.power_metadata_path)])
+        args.append("--autosize-controllers" if self.autosize_controllers else "--no-autosize-controllers")
         if self.controller_padding != 50:
-            args.extend(["--controller_padding", str(self.controller_padding)])
-        
+            args.extend(["--controller-padding", str(self.controller_padding)])
+
         args.extend(self.extra_engine_args)
-        
         return args
+
+    def validate_inputs(self, require_existing: bool = True) -> list[str]:
+        """Return validation errors for configured input files and values."""
+        errors: list[str] = []
+
+        if self.variants < 1:
+            errors.append("variants must be at least 1")
+        if self.controller_padding < 0:
+            errors.append("controller_padding must be non-negative")
+
+        if require_existing:
+            for field_name, path in (
+                ("audio_path", self.audio_path),
+                ("template_path", self.template_path),
+                ("layout_path", self.layout_path),
+                ("power_metadata_path", self.power_metadata_path),
+            ):
+                if path is not None and not path.exists():
+                    errors.append(f"{field_name} does not exist: {path}")
+
+        return errors
