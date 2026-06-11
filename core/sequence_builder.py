@@ -4,13 +4,13 @@ import argparse
 import sys
 import traceback
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 from core import engine_profiles
 from core.effects_orchestrator_bridge import EffectsOrchestrationRunReport, run_effects_orchestration
 from core.prime_beat_grid import prime_beat_grid_args
 from core.run_config import RunConfig
-from core.run_manager import RunManager
+from core.run_manager import RunContext, RunManager
 
 NO_EFFECTS_ORCHESTRATOR_FLAG = "--no-effects-orchestrator"
 PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG = "--promote-orchestrated-template"
@@ -27,6 +27,17 @@ ORCHESTRATOR_ONLY_FLAGS = {
     NO_EFFECTS_ORCHESTRATOR_FLAG,
     PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG,
     NO_ORCHESTRATOR_TEMPLATE_PROMOTION_FLAG,
+}
+_ARTIFACT_KIND_BY_SUFFIX = {
+    ".xsq": "xsq",
+    ".fseq": "fseq",
+    ".report.json": "report",
+    ".sequence_notes.txt": "sequence_notes",
+    ".chronoflow.json": "chronoflow_json",
+    ".chronoflow.html": "chronoflow_html",
+    ".snowman_band.json": "snowman_band_json",
+    "placement_plan.json": "placement_plan",
+    "xlights_effect_contract.json": "xlights_effect_contract",
 }
 
 
@@ -112,7 +123,7 @@ def _promote_orchestrated_template(
     return _set_or_replace_arg(list(cleaned or []), "--template", promoted_template)
 
 
-def _record_orchestration_artifacts(manager: RunManager, report: EffectsOrchestrationRunReport | None) -> None:
+def _record_orchestration_artifacts(ctx: RunContext, report: EffectsOrchestrationRunReport | None) -> None:
     if report is None:
         return
     artifact_paths = (
@@ -124,44 +135,103 @@ def _record_orchestration_artifacts(manager: RunManager, report: EffectsOrchestr
     )
     for kind, path in artifact_paths:
         if path:
-            manager.record_artifact(kind, Path(path))
+            ctx.record_artifact(kind, Path(path))
     if report.error:
-        manager.record_warning(f"effects_orchestrator: {report.error}")
+        ctx.record_warning(f"effects_orchestrator: {report.error}")
+
+
+def _artifact_search_roots(config: RunConfig, version: str) -> list[Path]:
+    roots = [config.output_root]
+    if config.output_root == Path("outputs"):
+        family = version.split(".", 1)[0]
+        if family:
+            roots.append(Path(family))
+    return _unique_paths(roots)
+
+
+def _unique_paths(paths: Iterable[Path]) -> list[Path]:
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for path in paths:
+        resolved = path.resolve(strict=False)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append(path)
+    return unique
+
+
+def _snapshot_known_artifacts(roots: Iterable[Path]) -> dict[Path, tuple[int, int]]:
+    snapshot: dict[Path, tuple[int, int]] = {}
+    for artifact in _known_artifact_paths(roots):
+        try:
+            stat = artifact.stat()
+        except OSError:
+            continue
+        snapshot[artifact.resolve(strict=False)] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def _record_changed_artifacts(
+    ctx: RunContext,
+    roots: Iterable[Path],
+    before: dict[Path, tuple[int, int]],
+) -> None:
+    for artifact in _known_artifact_paths(roots):
+        resolved = artifact.resolve(strict=False)
+        try:
+            stat = artifact.stat()
+        except OSError:
+            continue
+        if before.get(resolved) == (stat.st_mtime_ns, stat.st_size):
+            continue
+        ctx.record_artifact(_artifact_kind(artifact), artifact)
+
+
+def _known_artifact_paths(roots: Iterable[Path]) -> list[Path]:
+    paths: list[Path] = []
+    for root in _unique_paths(roots):
+        if not root.exists():
+            continue
+        paths.extend(path for path in root.rglob("*") if path.is_file() and _is_known_artifact(path))
+    return sorted(paths, key=lambda path: str(path))
+
+
+def _is_known_artifact(path: Path) -> bool:
+    name = path.name
+    return any(name.endswith(suffix) for suffix in _ARTIFACT_KIND_BY_SUFFIX)
+
+
+def _artifact_kind(path: Path) -> str:
+    name = path.name
+    for suffix, kind in sorted(_ARTIFACT_KIND_BY_SUFFIX.items(), key=lambda item: len(item[0]), reverse=True):
+        if name.endswith(suffix):
+            return kind
+    return "artifact"
 
 
 def run_profile(profile_id: str | None, engine_args: list[str] | None = None) -> None:
-    """Run a sequencing profile with integrated run tracking.
-
-    Creates a RunConfig from engine_args, initializes a RunManager, and wraps
-    the build logic with try/except to track success/failure.
-
-    Args:
-        profile_id: Profile identifier (e.g., "master", "v27.3").
-        engine_args: CLI arguments to pass to the effect engine.
-
-    Raises:
-        SystemExit: On configuration or runtime errors after logging details.
-    """
+    """Run a sequencing profile with integrated run tracking."""
     try:
         profile = engine_profiles.resolve_profile(profile_id)
-    except ValueError as e:
+    except (KeyError, ValueError) as e:
         print(f"ERROR: Invalid profile '{profile_id}': {e}", file=sys.stderr)
         raise SystemExit(1)
 
     engine_args = _apply_prime_beat_grid_defaults(profile.version, engine_args)
+    resolved_profile_id = getattr(profile, "profile_id", profile_id or engine_profiles.ACTIVE_PROFILE_ID)
 
-    # Create RunConfig from engine arguments
     try:
-        config = RunConfig.from_engine_args(profile_id or "master", engine_args or [])
+        config = RunConfig.from_engine_args(resolved_profile_id, engine_args or [])
     except (ValueError, TypeError) as e:
         print(f"ERROR: Invalid arguments: {e}", file=sys.stderr)
         print("Use --help for usage information.", file=sys.stderr)
         raise SystemExit(1)
 
-    # Initialize run manager
+    command = ["main.py", "--profile", resolved_profile_id, "--", *(engine_args or [])]
     try:
-        manager = RunManager(config)
-    except (OSError, IOError) as e:
+        ctx = RunManager(config).start(command=command, require_existing=False)
+    except (OSError, IOError, ValueError) as e:
         print(f"ERROR: Failed to initialize run directory: {e}", file=sys.stderr)
         raise SystemExit(1)
 
@@ -173,30 +243,34 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
                 print(f"effects_orchestrator: invoked passes={len(report.passes)} report={report.report_path}")
             else:
                 print(f"effects_orchestrator: unavailable error={report.error}")
-            _record_orchestration_artifacts(manager, report)
+            _record_orchestration_artifacts(ctx, report)
 
         effective_engine_args = _promote_orchestrated_template(engine_args, report)
         if report is not None and report.invoked and report.xsq_written and effective_engine_args != _clean_engine_args(engine_args):
             print(f"effects_orchestrator: promoted template={report.orchestrated_xsq_path}")
 
-        # Run the effect engine
-        _effect_engine().main_for(profile.version, effective_engine_args)
+        artifact_roots = _artifact_search_roots(config, profile.version)
+        artifact_snapshot = _snapshot_known_artifacts(artifact_roots)
+        try:
+            _effect_engine().main_for(profile.version, effective_engine_args)
+        finally:
+            _record_changed_artifacts(ctx, artifact_roots, artifact_snapshot)
+            ctx.record_artifact("configured_output_root", config.output_root)
 
-        # Finalize with success
-        manager.finalize(success=True)
-        print(f"SUCCESS: Run completed. Manifest: {manager.manifest_path}", file=sys.stderr)
+        ctx.finalize(success=True)
+        print(f"SUCCESS: Run completed. Manifest: {ctx.manifest_path}", file=sys.stderr)
 
     except KeyboardInterrupt:
         error_summary = "Run interrupted by user (Ctrl+C)"
         print(f"\nINTERRUPTED: {error_summary}", file=sys.stderr)
-        manager.finalize(success=False, error_summary=error_summary)
+        ctx.finalize(success=False, error_summary=error_summary)
         raise SystemExit(130)
 
     except Exception as e:
         error_summary = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
         print(f"ERROR: {error_summary}", file=sys.stderr)
-        print(f"Manifest saved to: {manager.manifest_path}", file=sys.stderr)
-        manager.finalize(success=False, error_summary=error_summary)
+        print(f"Manifest saved to: {ctx.manifest_path}", file=sys.stderr)
+        ctx.finalize(success=False, error_summary=error_summary)
         raise SystemExit(1)
 
 
@@ -261,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list_profiles or args.list_versions:
         for profile in available_profiles():
-            print(f"{profile.version}\t{profile.label}\t{profile.description}")
+            print(f"{profile.version}\t{profile.title}\t{profile.description}")
         return 0
 
     profiles = args.profiles or [None]
