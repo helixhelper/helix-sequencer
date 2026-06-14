@@ -5,32 +5,38 @@ This directory contains the first mobile path for Helix.
 ## Pieces
 
 - `android_kivy/` - Android-friendly Kivy app.
-- `helix_api/` - LAN/desktop FastAPI runner that wraps the existing CLI.
+- `helix_api/` - LAN or desktop FastAPI runner that wraps the existing CLI.
 
-## MVP flow
+## MVP flows
+
+### Path mode
 
 ```text
 Android phone
   -> Helix Kivy app
-  -> POST /jobs on desktop/cloud runner
-  -> python main.py --profile ... -- --audio ...
-  -> outputs/mobile/<job_id>/
+  -> POST /jobs on runner
+  -> python main.py with selected profile and audio path
+  -> outputs/mobile/job_id/
+```
+
+### Upload mode
+
+```text
+Android phone
+  -> Helix Kivy app
+  -> POST /jobs/upload with audio file
+  -> runner saves upload under outputs/mobile/uploads/
+  -> python main.py with selected profile and uploaded audio
+  -> outputs/mobile/job_id/
 ```
 
 ## Current limitations
 
-- The Android app uses manual audio path entry for now.
-- The server expects the audio path to exist on the runner machine.
+- The Android app still uses manual audio path entry for now.
+- Upload mode works for a normal local file path; native Android file picker support is the next slice.
 - Job state is in memory.
 - Artifact download endpoints are not added yet.
 
 ## Recommended next slice
 
-Add an upload endpoint so Android can send an audio file directly to the runner:
-
-```http
-POST /jobs/upload
-multipart/form-data: audio file + profile + style + layout
-```
-
-Then add a native Android file picker in the Kivy app.
+Add a native Android file picker in the Kivy app, then add artifact download endpoints for sequence files, preview videos, xModels, logs, and run manifests.
