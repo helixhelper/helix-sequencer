@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
-import shutil
 import subprocess
 import sys
 import threading
