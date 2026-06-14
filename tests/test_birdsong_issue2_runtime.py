@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from core.birdsong_issue2_runtime import (
     BirdsongRuntimeConfig,
     emit_birdsong_rows,
@@ -94,3 +96,57 @@ def test_emit_birdsong_rows_uses_existing_add_model_contract() -> None:
     assert emitted == len(calls)
     assert all(call[3] == "birdsong_issue2" for call in calls)
     assert all(call[5] == "other" for call in calls)
+
+
+def test_emit_birdsong_rows_counts_boolean_callback_results() -> None:
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star"],
+        config=BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=1),
+    )[:1]
+
+    assert emit_birdsong_rows(rows, lambda *args, **kwargs: True) == 1
+    assert emit_birdsong_rows(rows, lambda *args, **kwargs: False) == 0
+
+
+def test_emit_birdsong_rows_counts_integer_and_unknown_callback_results() -> None:
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star"],
+        config=BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=1),
+    )[:1]
+
+    assert emit_birdsong_rows(rows, lambda *args, **kwargs: 3) == 3
+    assert emit_birdsong_rows(rows, lambda *args, **kwargs: None) == 1
+
+
+def test_generate_birdsong_rows_sanitizes_invalid_config_values() -> None:
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star", "arch", "ground", "mega"],
+        config=BirdsongRuntimeConfig(
+            enabled=True,
+            duration_ms="invalid",
+            max_targets_per_frame="invalid",
+        ),
+    )
+
+    assert len(rows) == 6
+    assert all(row.end_ms > row.start_ms for row in rows)
+
+
+def test_generate_birdsong_rows_skips_non_finite_frame_times() -> None:
+    frames = _frames()
+    bad_frames = [
+        frames[0],
+        replace(frames[1], time_s=float("nan")),
+        replace(frames[2], time_s=float("inf")),
+    ]
+
+    rows = generate_birdsong_rows(
+        bad_frames,
+        ["star", "arch"],
+        config=BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=1),
+    )
+
+    assert rows == []
