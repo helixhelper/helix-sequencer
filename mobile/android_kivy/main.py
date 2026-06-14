@@ -27,7 +27,7 @@ class HelixMobileRoot(BoxLayout):
         self.add_widget(Label(text="Audio in. Lights out.", size_hint_y=None, height=dp(28)))
 
         self.audio_path = TextInput(
-            hint_text="Audio file path or Android content reference",
+            hint_text="Audio file path. Upload mode sends this local file to the runner.",
             multiline=False,
             size_hint_y=None,
             height=dp(48),
@@ -43,9 +43,13 @@ class HelixMobileRoot(BoxLayout):
         self.layout_name = Spinner(text="aaatest", values=LAYOUTS, size_hint_y=None, height=dp(48))
         self.add_widget(self.layout_name)
 
-        self.submit = Button(text="Generate Sequence", size_hint_y=None, height=dp(56))
-        self.submit.bind(on_press=self.on_submit)
-        self.add_widget(self.submit)
+        self.submit_path = Button(text="Generate: Audio Already On Runner", size_hint_y=None, height=dp(52))
+        self.submit_path.bind(on_press=self.on_submit_path)
+        self.add_widget(self.submit_path)
+
+        self.submit_upload = Button(text="Upload Audio + Generate", size_hint_y=None, height=dp(56))
+        self.submit_upload.bind(on_press=self.on_submit_upload)
+        self.add_widget(self.submit_upload)
 
         self.refresh = Button(text="Refresh Last Job", size_hint_y=None, height=dp(48))
         self.refresh.bind(on_press=self.on_refresh)
@@ -62,32 +66,50 @@ class HelixMobileRoot(BoxLayout):
     def set_status(self, text: str) -> None:
         self.status.text = text
 
-    def on_submit(self, *_args):
+    def _current_request(self) -> HelixJobRequest | None:
         audio = self.audio_path.text.strip()
         if not audio:
-            self.set_status("Add an audio path first. File picker comes in the next slice.")
+            self.set_status("Add an audio path first. Native file picker comes in the next slice.")
+            return None
+        return HelixJobRequest(
+            audio_path=audio,
+            profile=self.profile.text,
+            style=self.style.text,
+            layout=self.layout_name.text,
+        )
+
+    def on_submit_path(self, *_args):
+        request = self._current_request()
+        if request is None:
             return
+        self._set_submit_disabled(True)
+        self.set_status("Submitting Helix path job...")
+        Clock.schedule_once(lambda _dt: self._submit_job(request, upload=False), 0)
 
-        self.submit.disabled = True
-        self.set_status("Submitting Helix job...")
-        Clock.schedule_once(lambda _dt: self._submit_job(audio), 0)
+    def on_submit_upload(self, *_args):
+        request = self._current_request()
+        if request is None:
+            return
+        self._set_submit_disabled(True)
+        self.set_status("Uploading audio and submitting Helix job...")
+        Clock.schedule_once(lambda _dt: self._submit_job(request, upload=True), 0)
 
-    def _submit_job(self, audio: str) -> None:
+    def _submit_job(self, request: HelixJobRequest, *, upload: bool) -> None:
         try:
-            result = self.client.submit_job(
-                HelixJobRequest(
-                    audio_path=audio,
-                    profile=self.profile.text,
-                    style=self.style.text,
-                    layout=self.layout_name.text,
-                )
-            )
+            if upload:
+                result = self.client.upload_and_submit_job(request)
+            else:
+                result = self.client.submit_job(request)
             self.last_job_id = result.job_id
             self.set_status(self._format_result(result))
         except Exception as exc:  # pragma: no cover - visible in UI.
             self.set_status(f"Job failed: {exc}")
         finally:
-            self.submit.disabled = False
+            self._set_submit_disabled(False)
+
+    def _set_submit_disabled(self, disabled: bool) -> None:
+        self.submit_path.disabled = disabled
+        self.submit_upload.disabled = disabled
 
     def on_refresh(self, *_args):
         if not self.last_job_id:
