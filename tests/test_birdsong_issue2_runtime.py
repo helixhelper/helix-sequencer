@@ -58,7 +58,11 @@ def test_generate_birdsong_rows_defaults_off() -> None:
 def test_generate_birdsong_rows_emits_deterministic_rows_when_enabled() -> None:
     frames = _frames()
     models = ["star", "arch", "ground", "mega"]
-    config = BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=2, duration_ms=120)
+    config = BirdsongRuntimeConfig(
+        enabled=True,
+        max_targets_per_frame=2,
+        duration_ms=120,
+    )
 
     first = generate_birdsong_rows(frames, models, config=config)
     second = generate_birdsong_rows(frames, models, config=config)
@@ -73,7 +77,11 @@ def test_generate_birdsong_rows_emits_deterministic_rows_when_enabled() -> None:
 def test_generate_birdsong_rows_dedupes_models_and_limits_targets() -> None:
     config = BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=1)
 
-    rows = generate_birdsong_rows(_frames(), ["star", "STAR", "arch"], config=config)
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star", "STAR", "arch"],
+        config=config,
+    )
 
     assert len(rows) == 2
     assert all(row.model in {"star", "arch"} for row in rows)
@@ -87,7 +95,14 @@ def test_emit_birdsong_rows_uses_existing_add_model_contract() -> None:
     )
     calls: list[tuple[str, int, int, str, str, str]] = []
 
-    def add_model(model: str, st: int, en: int, label: str, eff: str = "On", stem: str = "other") -> None:
+    def add_model(
+        model: str,
+        st: int,
+        en: int,
+        label: str,
+        eff: str = "On",
+        stem: str = "other",
+    ) -> None:
         calls.append((model, st, en, label, eff, stem))
 
     emitted = emit_birdsong_rows(rows, add_model)
@@ -98,6 +113,13 @@ def test_emit_birdsong_rows_uses_existing_add_model_contract() -> None:
     assert all(call[5] == "other" for call in calls)
 
 
+def _constant_callback(value):
+    def callback(*_args, **_kwargs):
+        return value
+
+    return callback
+
+
 def test_emit_birdsong_rows_counts_boolean_callback_results() -> None:
     rows = generate_birdsong_rows(
         _frames(),
@@ -105,8 +127,8 @@ def test_emit_birdsong_rows_counts_boolean_callback_results() -> None:
         config=BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=1),
     )[:1]
 
-    assert emit_birdsong_rows(rows, lambda *args, **kwargs: True) == 1
-    assert emit_birdsong_rows(rows, lambda *args, **kwargs: False) == 0
+    assert emit_birdsong_rows(rows, _constant_callback(True)) == 1
+    assert emit_birdsong_rows(rows, _constant_callback(False)) == 0
 
 
 def test_emit_birdsong_rows_counts_integer_and_unknown_callback_results() -> None:
@@ -116,8 +138,8 @@ def test_emit_birdsong_rows_counts_integer_and_unknown_callback_results() -> Non
         config=BirdsongRuntimeConfig(enabled=True, max_targets_per_frame=1),
     )[:1]
 
-    assert emit_birdsong_rows(rows, lambda *args, **kwargs: 3) == 3
-    assert emit_birdsong_rows(rows, lambda *args, **kwargs: None) == 1
+    assert emit_birdsong_rows(rows, _constant_callback(3)) == 3
+    assert emit_birdsong_rows(rows, _constant_callback(None)) == 1
 
 
 def test_generate_birdsong_rows_sanitizes_invalid_config_values() -> None:
