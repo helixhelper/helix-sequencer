@@ -17,6 +17,10 @@ class Step:
     required_paths: tuple[Path, ...] = ()
 
 
+def _pytest(path: str) -> tuple[str, ...]:
+    return (sys.executable, "-m", "pytest", "-q", path)
+
+
 STEPS = (
     Step(
         "compile focused recovery modules",
@@ -33,35 +37,46 @@ STEPS = (
     ),
     Step(
         "birdsong runtime adapter tests",
-        (sys.executable, "-m", "pytest", "-q", "tests/test_birdsong_issue2_runtime.py"),
+        _pytest("tests/test_birdsong_issue2_runtime.py"),
         (ROOT / "tests/test_birdsong_issue2_runtime.py",),
     ),
     Step(
         "feature state tests",
-        (sys.executable, "-m", "pytest", "-q", "tests/test_feature_state.py"),
+        _pytest("tests/test_feature_state.py"),
         (ROOT / "tests/test_feature_state.py",),
     ),
     Step(
         "preview HQ preset tests",
-        (sys.executable, "-m", "pytest", "-q", "tests/test_preview_hq.py"),
+        _pytest("tests/test_preview_hq.py"),
         (ROOT / "tests/test_preview_hq.py",),
     ),
     Step(
         "preview HQ preset validation command",
-        (sys.executable, "tools/preview_hq.py", "--validate-quality-presets"),
+        (
+            sys.executable,
+            "tools/preview_hq.py",
+            "--validate-quality-presets",
+        ),
         (ROOT / "tools/preview_hq.py",),
     ),
     Step(
         "xLights contract validator tests",
-        (sys.executable, "-m", "pytest", "-q", "tests/test_xlights_contract_validator.py"),
+        _pytest("tests/test_xlights_contract_validator.py"),
         (ROOT / "tests/test_xlights_contract_validator.py",),
     ),
     Step(
         "sequence builder smoke tests",
-        (sys.executable, "-m", "pytest", "-q", "tests/test_sequence_builder.py"),
+        _pytest("tests/test_sequence_builder.py"),
         (ROOT / "tests/test_sequence_builder.py",),
     ),
 )
+
+
+def _pythonpath(env: dict[str, str]) -> str:
+    current = env.get("PYTHONPATH")
+    if not current:
+        return str(ROOT)
+    return f"{ROOT}{os.pathsep}{current}"
 
 
 def _run(step: Step) -> tuple[str, bool]:
@@ -71,7 +86,7 @@ def _run(step: Step) -> tuple[str, bool]:
 
     print(f"\n== {step.name} ==")
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT) if not env.get("PYTHONPATH") else f"{ROOT}{os.pathsep}{env['PYTHONPATH']}"
+    env["PYTHONPATH"] = _pythonpath(env)
     result = subprocess.run(step.command, cwd=ROOT, env=env, check=False)
     if result.returncode:
         print(f"FAIL {step.name}: exit {result.returncode}")
@@ -83,10 +98,14 @@ def _run(step: Step) -> tuple[str, bool]:
 def main() -> int:
     print("Helix recovery gate")
     print(f"Repository root: {ROOT}")
-    print("This targeted gate does not replace full CI, xLights import proof, or controller validation.")
+    print("This targeted gate does not replace full CI or xLights proof.")
 
     results = [(step.name, *_run(step)) for step in STEPS]
-    failures = [name for name, status, ok in results if not ok and status == "FAIL"]
+    failures = [
+        name
+        for name, status, ok in results
+        if not ok and status == "FAIL"
+    ]
 
     print("\nRecovery gate summary")
     for name, status, _ok in results:
