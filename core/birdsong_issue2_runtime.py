@@ -155,7 +155,13 @@ def _effect_for_motif(motif: str, frame: FeatureStateFrame) -> str:
     return "Single Strand"
 
 
-def _select_models(models: Sequence[str], frame: FeatureStateFrame, frame_index: int, *, limit: int) -> list[str]:
+def _select_models(
+    models: Sequence[str],
+    frame: FeatureStateFrame,
+    frame_index: int,
+    *,
+    limit: int,
+) -> list[str]:
     if not models:
         return []
     count = min(len(models), max(1, limit))
