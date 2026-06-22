@@ -123,6 +123,18 @@ Run specific test:
 python -m pytest tests/test_sequence_builder.py -v
 ```
 
+Run the beta smoke wrapper:
+```bash
+scripts/run_smoke.sh
+```
+
+On Windows PowerShell:
+```powershell
+./scripts/run_smoke.ps1
+```
+
+The smoke wrapper covers compile/profile-list checks, selected contract tests, and the clean-room beta demo fixture. It does not prove xLights import success, visual quality, controller/channel safety, or production readiness.
+
 ## 🔧 Configuration
 
 ### Engine Arguments
