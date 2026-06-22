@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,6 +9,8 @@ from pathlib import Path
 from core.model_parser import Model, parse_layout
 
 NETWORKS_FILENAME = "xlights_networks.xml"
+PREVIEW_NETWORK_DESC = "Helix preview null controller"
+MIN_PREVIEW_CHANNELS = 1
 
 _CHANNEL_KEYS = (
     "ChannelCount",
@@ -157,7 +161,7 @@ def build_controller_plan(
             synthesized_null_controller=False,
         )
 
-    null_channels = max(1, layout_count + max(0, int(padding)))
+    null_channels = max(MIN_PREVIEW_CHANNELS, layout_count + max(0, int(padding)))
     return ControllerPlan(
         source="layout_fallback",
         channel_count=null_channels,
@@ -173,6 +177,44 @@ def build_controller_plan(
         ),
         synthesized_null_controller=True,
     )
+
+
+def write_networks_file(plan: ControllerPlan, target: Path) -> Path:
+    """Write or copy xlights_networks.xml for an output show folder."""
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if plan.source == "xlights_networks" and plan.networks_path is not None and plan.networks_path.exists():
+        source = plan.networks_path.resolve()
+        destination = target.resolve(strict=False)
+        if source != destination:
+            shutil.copy2(source, target)
+        return target
+
+    root = ET.Element("Networks", {"computer": os.environ.get("COMPUTERNAME", "WINDOWS")})
+    ET.SubElement(
+        root,
+        "network",
+        {
+            "NetworkType": "NULL",
+            "MaxChannels": str(max(MIN_PREVIEW_CHANNELS, int(plan.channel_count))),
+            "Description": PREVIEW_NETWORK_DESC,
+        },
+    )
+    _indent_xml(root)
+    ET.ElementTree(root).write(target, encoding="utf-8", xml_declaration=True)
+    return target
+
+
+def write_networks_for_xsq_outputs(plan: ControllerPlan, output_paths: list[Path]) -> list[Path]:
+    """Place xlights_networks.xml beside generated XSQ files or directories."""
+
+    targets: dict[Path, Path] = {}
+    for path in output_paths:
+        path = Path(path)
+        folder = path if path.suffix.lower() != ".xsq" else path.parent
+        targets[folder.resolve(strict=False)] = folder / NETWORKS_FILENAME
+    return [write_networks_file(plan, target) for target in targets.values()]
 
 
 def _controller_from_element(element: ET.Element) -> ControllerInfo | None:
@@ -241,6 +283,19 @@ def _name_for(element: ET.Element, attrs: dict[str, str]) -> str:
         if value:
             return value
     return _strip_namespace(element.tag)
+
+
+def _indent_xml(elem: ET.Element, level: int = 0) -> None:
+    pad = "\n" + ("  " * level)
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = pad + "  "
+        for child in elem:
+            _indent_xml(child, level + 1)
+        if not elem[-1].tail or not elem[-1].tail.strip():
+            elem[-1].tail = pad
+    if level and (not elem.tail or not elem.tail.strip()):
+        elem.tail = pad
 
 
 def _strip_namespace(tag: str) -> str:
