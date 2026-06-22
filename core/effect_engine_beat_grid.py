@@ -192,7 +192,7 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    effect_engine.main_for(effect_engine.ACTIVE_STYLE_VERSION, argv)
+    main_for(effect_engine.ACTIVE_STYLE_VERSION, argv)
 
 
 if __name__ == "__main__":
