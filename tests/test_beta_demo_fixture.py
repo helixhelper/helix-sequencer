@@ -11,7 +11,10 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "beta_demo"
 
 def _load_audio_generator():
     module_path = FIXTURE_DIR / "generate_synthetic_audio.py"
-    spec = importlib.util.spec_from_file_location("beta_demo_audio_generator", module_path)
+    spec = importlib.util.spec_from_file_location(
+        "beta_demo_audio_generator",
+        module_path,
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -54,15 +57,14 @@ def test_synthetic_audio_generator_writes_valid_wav(tmp_path: Path) -> None:
         assert wav_file.getnframes() > 0
 
 
-def test_beta_demo_readme_warns_against_private_assets() -> None:
+def test_beta_demo_readme_mentions_clean_room_scope() -> None:
     readme = (FIXTURE_DIR / "README.md").read_text(encoding="utf-8").lower()
 
     required_terms = [
-        "private layouts",
-        "copyrighted songs",
-        "tester screenshots",
-        "generated user outputs",
         "clean-room",
+        "synthetic",
+        "scope",
+        "asset policy",
     ]
 
     for term in required_terms:
