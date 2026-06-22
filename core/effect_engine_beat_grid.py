@@ -8,6 +8,8 @@ from typing import Any, Iterable
 from core.beat_grid_runtime import parse_beat_grid_runtime_args
 from core import effect_engine
 from core import self_improving_scoring
+from core.controller_parser import build_controller_plan, write_networks_for_xsq_outputs
+from core.run_config import RunConfig
 from core.snowman_band_beat_grid import snap_snowman_band_payload_to_grid
 
 
@@ -103,6 +105,61 @@ def postprocess_beat_grid_outputs(root: Path, beat_grid, *, since: float | None 
     }
 
 
+def _artifact_search_roots(config: RunConfig, version: str) -> list[Path]:
+    roots = [config.output_root]
+    if config.output_root == Path("outputs"):
+        family = version.split(".", 1)[0]
+        if family:
+            roots.append(Path(family))
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        resolved = root.resolve(strict=False)
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(root)
+    return unique
+
+
+def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
+    outputs: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.xsq"):
+            if path.is_file() and _is_recent(path, since):
+                outputs.append(path)
+    return sorted(outputs, key=lambda path: str(path))
+
+
+def autosize_controller_sidecars(version: str, argv: list[str], *, since: float) -> dict[str, Any] | None:
+    """Copy or synthesize xlights_networks.xml beside freshly rendered XSQ files."""
+
+    try:
+        config = RunConfig.from_engine_args("engine", argv)
+    except Exception as exc:
+        return {"enabled": False, "error": f"failed to parse engine args: {exc}"}
+    if not config.autosize_controllers:
+        return None
+    if config.layout_path is None:
+        return {"enabled": False, "error": "--autosize-controllers requires --layout-file"}
+
+    plan = build_controller_plan(config.layout_path, padding=config.controller_padding)
+    roots = _artifact_search_roots(config, version)
+    xsq_outputs = _recent_xsq_outputs(roots, since=since)
+    output_targets = xsq_outputs or [config.output_root]
+    sidecars = write_networks_for_xsq_outputs(plan, output_targets)
+    return {
+        "enabled": True,
+        "source": plan.source,
+        "channel_count": plan.channel_count,
+        "layout_channel_count": plan.layout_channel_count,
+        "synthesized_null_controller": plan.synthesized_null_controller,
+        "xsq_outputs": [str(path) for path in xsq_outputs],
+        "sidecars": [str(path) for path in sidecars],
+    }
+
+
 def main_for(version: str, argv: list[str] | None = None) -> None:
     """Run effect_engine while consuming BeatGrid runtime flags.
 
@@ -113,7 +170,18 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
 
     started = time.time()
     options = parse_beat_grid_runtime_args(argv or [])
-    effect_engine.main_for(version, list(options.cleaned_args))
+    cleaned_args = list(options.cleaned_args)
+    effect_engine.main_for(version, cleaned_args)
+    controller_summary = autosize_controller_sidecars(version, cleaned_args, since=started)
+    if controller_summary is not None:
+        if controller_summary.get("enabled"):
+            effect_engine.log(
+                "Controller autosize: "
+                f"source={controller_summary['source']} channels={controller_summary['channel_count']} "
+                f"sidecars={len(controller_summary['sidecars'])}"
+            )
+        else:
+            effect_engine.log(f"Controller autosize skipped: {controller_summary.get('error')}")
     if options.snap_timing and options.beat_grid is not None:
         summary = postprocess_beat_grid_outputs(Path("."), options.beat_grid, since=started)
         effect_engine.log(
