@@ -64,7 +64,7 @@ jobs:
 
       - name: Export 20-second Birdsong demo manifest
         run: |
-          python tools/export_birdsong_demo_manifest.py \
+          python -m tools.export_birdsong_demo_manifest \
             --output test_runs/birdsong_demo/birdsong_intents.json \
             --duration-seconds 20 \
             --step-seconds 1 \

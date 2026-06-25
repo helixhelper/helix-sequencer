@@ -16,6 +16,7 @@ def test_export_review_artifacts_writes_all_expected_files(tmp_path: Path) -> No
         "iteration",
         "xsq",
         "mp4",
+        "preview_metadata",
         "acceptance_summary",
     }
     for path in paths.values():
