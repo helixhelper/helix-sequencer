@@ -75,7 +75,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: helix-flow-review-artifacts
-          path: test_runs/helix_flow_demo/*
+          path: |
+            test_runs/helix_flow_demo/*.json
+            test_runs/helix_flow_demo/*.xsq
+            test_runs/helix_flow_demo/*.mp4
+            test_runs/helix_flow_demo/*.md
+            test_runs/helix_flow_demo/*.log
           if-no-files-found: warn
 
       - name: Fail if MP4 render failed

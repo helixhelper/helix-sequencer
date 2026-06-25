@@ -251,6 +251,7 @@ jobs:
             tests/test_lyric_section_scheduler.py
             tests/test_energy_scaler.py
             tests/test_beat_aligner.py
+            tests/test_vocal_pipeline_integration.py
             tests/test_xsq_emitter.py
             tests/test_xsq_validation_tool.py
             tests/test_export_demo_xsq.py

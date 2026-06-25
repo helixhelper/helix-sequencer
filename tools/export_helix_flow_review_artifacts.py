@@ -18,6 +18,9 @@ from tools.export_birdsong_demo_manifest import (
 from tools.render_xsq_skeleton_preview import parse_preview_effects
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def export_review_artifacts(
     output_dir: Path,
     *,
@@ -44,8 +47,9 @@ def export_review_artifacts(
     )
     command = [
         sys.executable,
-        "tools/render_xsq_skeleton_preview.py",
-        str(xsq),
+        "-m",
+        "tools.render_xsq_skeleton_preview",
+        str(xsq.resolve()),
         "--width",
         "1280",
         "--height",
@@ -54,8 +58,8 @@ def export_review_artifacts(
         "24",
     ]
     if audio is not None:
-        command.extend(["--audio", str(audio)])
-    subprocess.run(command, check=True)
+        command.extend(["--audio", str(audio.resolve())])
+    subprocess.run(command, check=True, cwd=ROOT)
     mp4 = xsq.with_suffix(".mp4")
     effects = parse_preview_effects(xsq)
     visual_models = sorted({effect.model for effect in effects})
