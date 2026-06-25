@@ -36,9 +36,11 @@ class DrumEvent:
 class DrumClassifierThresholds:
     low_confidence_min: float = 0.34
     kick_low_ratio_min: float = 0.42
-    snare_mid_ratio_min: float = 0.34
-    tom_mid_low_ratio_min: float = 0.34
+    snare_mid_ratio_min: float = 0.26
+    snare_sharpness_min: float = 0.12
+    tom_mid_low_ratio_min: float = 0.30
     hihat_high_ratio_min: float = 0.45
+    hihat_decay_max: float = 0.34
     cymbal_high_ratio_min: float = 0.36
     cymbal_decay_min: float = 0.52
 
@@ -73,6 +75,22 @@ def classify_drum_hit(
     spread = _clamp(features.get("spectral_spread01", 0.0))
     sharp = _clamp(features.get("transient_sharpness", 0.0))
     decay = _clamp(features.get("decay_profile", 0.0))
+
+    if low >= thresholds.kick_low_ratio_min and centroid < 1500:
+        confidence = _clamp((low * 0.68) + (sharp * 0.22) + ((1.0 - min(1.0, centroid / 1500.0)) * 0.10))
+        return "kick", round(confidence, 3)
+    if high >= thresholds.hihat_high_ratio_min and decay <= thresholds.hihat_decay_max and sharp >= 0.10:
+        confidence = _clamp((high * 0.64) + (sharp * 0.28) + ((1.0 - decay) * 0.08))
+        return "hihat", round(confidence, 3)
+    if high >= thresholds.cymbal_high_ratio_min and decay >= thresholds.cymbal_decay_min:
+        confidence = _clamp((high * 0.44) + (decay * 0.34) + (spread * 0.22))
+        return "cymbal", round(confidence, 3)
+    if mid >= thresholds.snare_mid_ratio_min and sharp >= thresholds.snare_sharpness_min and high < 0.58:
+        confidence = _clamp((mid * 0.48) + (sharp * 0.34) + (spread * 0.14) + (mid_low * 0.04))
+        return "snare", round(confidence, 3)
+    if mid_low >= thresholds.tom_mid_low_ratio_min and high < 0.44 and centroid < 1900:
+        confidence = _clamp((mid_low * 0.52) + ((1.0 - abs(centroid - 950.0) / 1600.0) * 0.22) + (decay * 0.16) + (sharp * 0.10))
+        return "tom", round(confidence, 3)
 
     candidates: list[tuple[str, float]] = []
     candidates.append(("kick", (low * 0.58) + ((1.0 - min(1.0, centroid / 1600.0)) * 0.24) + (sharp * 0.18)))

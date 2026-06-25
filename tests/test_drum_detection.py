@@ -35,10 +35,52 @@ class DrumDetectionTests(unittest.TestCase):
                 "decay_profile": 0.1,
             }
         )
+        snare, snare_conf = classify_drum_hit(
+            {
+                "low_ratio": 0.10,
+                "mid_low_ratio": 0.18,
+                "mid_ratio": 0.42,
+                "high_ratio": 0.24,
+                "centroid_hz": 1900,
+                "spectral_spread01": 0.52,
+                "transient_sharpness": 0.55,
+                "decay_profile": 0.22,
+            }
+        )
+        tom, tom_conf = classify_drum_hit(
+            {
+                "low_ratio": 0.18,
+                "mid_low_ratio": 0.46,
+                "mid_ratio": 0.22,
+                "high_ratio": 0.10,
+                "centroid_hz": 850,
+                "spectral_spread01": 0.35,
+                "transient_sharpness": 0.34,
+                "decay_profile": 0.40,
+            }
+        )
+        cymbal, cymbal_conf = classify_drum_hit(
+            {
+                "low_ratio": 0.02,
+                "mid_low_ratio": 0.06,
+                "mid_ratio": 0.16,
+                "high_ratio": 0.62,
+                "centroid_hz": 6200,
+                "spectral_spread01": 0.72,
+                "transient_sharpness": 0.22,
+                "decay_profile": 0.72,
+            }
+        )
         self.assertEqual(kick, "kick")
         self.assertEqual(hat, "hihat")
+        self.assertEqual(snare, "snare")
+        self.assertEqual(tom, "tom")
+        self.assertEqual(cymbal, "cymbal")
         self.assertGreater(kick_conf, 0.4)
         self.assertGreater(hat_conf, 0.4)
+        self.assertGreater(snare_conf, 0.4)
+        self.assertGreater(tom_conf, 0.4)
+        self.assertGreater(cymbal_conf, 0.4)
 
     def test_synthetic_percussive_signal_produces_events(self) -> None:
         sr = 22050
