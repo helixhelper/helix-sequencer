@@ -14,15 +14,15 @@ MANIFEST = ROOT / "fixtures" / "band_geometry" / "drummer_v3_png_layer_manifest.
 
 REQUIRED_FRAMES = {
     "idle_ready",
-    "kick",
-    "snare",
-    "hi_hat",
-    "left_tom",
-    "right_tom",
-    "left_cymbal",
-    "right_cymbal",
-    "both_cymbals",
-    "downbeat",
+    "kick_hit",
+    "snare_hit",
+    "hi_hat_pulse",
+    "left_tom_hit",
+    "right_tom_hit",
+    "left_crash",
+    "right_crash",
+    "both_crash",
+    "downbeat_impact",
 }
 
 
@@ -51,6 +51,7 @@ def test_drummer_v3_manifest_declares_png_input_and_frames() -> None:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["source_image"] == "fixtures/band_geometry/source/drummerbg.png"
+    assert manifest["contact_sheet"] == "HX_SNOWMAN_DRUMMER_V3_pose_sheet.png"
     assert set(manifest["required_frames"]) == REQUIRED_FRAMES
     assert len(manifest["layers"]) == 9
 

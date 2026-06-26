@@ -16,6 +16,38 @@ DRUM_SUBMODEL_BY_TYPE = {
 }
 
 DRUM_PRIORITY = {"kick": 0, "snare": 1, "cymbal": 2, "tom": 3, "hihat": 4, "drum_bus": 5}
+DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER_V3"
+DRUMMER_V3_POSE_BY_TYPE = {
+    "kick": "kick_hit",
+    "snare": "snare_hit",
+    "hihat": "hi_hat_pulse",
+    "tom": "left_tom_hit",
+    "cymbal": "right_crash",
+    "drum_bus": "downbeat_impact",
+}
+DRUMMER_V3_SUBMODELS_BY_POSE = {
+    "idle_ready": ("HX_SNOWMAN_DRUMMER_V3_LEFT_ARM_IDLE", "HX_SNOWMAN_DRUMMER_V3_RIGHT_ARM_IDLE"),
+    "kick_hit": ("HX_SNOWMAN_DRUMMER_V3_HIT_KICK",),
+    "snare_hit": ("HX_SNOWMAN_DRUMMER_V3_HIT_SNARE",),
+    "hi_hat_pulse": ("HX_SNOWMAN_DRUMMER_V3_HIT_HIHAT",),
+    "left_tom_hit": ("HX_SNOWMAN_DRUMMER_V3_HIT_LEFT_TOM",),
+    "right_tom_hit": ("HX_SNOWMAN_DRUMMER_V3_HIT_RIGHT_TOM",),
+    "left_crash": ("HX_SNOWMAN_DRUMMER_V3_HIT_LEFT_CRASH",),
+    "right_crash": ("HX_SNOWMAN_DRUMMER_V3_HIT_RIGHT_CRASH",),
+    "both_crash": ("HX_SNOWMAN_DRUMMER_V3_HIT_BOTH_CRASH",),
+    "downbeat_impact": ("HX_SNOWMAN_DRUMMER_V3_DOWNBEAT_IMPACT",),
+}
+DRUMMER_V3_DURATION_BY_POSE = {
+    "kick_hit": 150,
+    "snare_hit": 125,
+    "hi_hat_pulse": 80,
+    "left_tom_hit": 155,
+    "right_tom_hit": 155,
+    "left_crash": 320,
+    "right_crash": 320,
+    "both_crash": 360,
+    "downbeat_impact": 220,
+}
 
 
 @dataclass(frozen=True)
@@ -133,6 +165,40 @@ def map_events_to_submodels(events: Iterable[DrumEvent]) -> list[dict[str, objec
     return mapped
 
 
+def drummer_v3_pose_for_event(event: DrumEvent, event_index: int = 0) -> str:
+    """Return the Drummer v3 pose name for a detected drum/percussion event."""
+    drum_type = event.drum_type
+    if drum_type == "tom":
+        return "right_tom_hit" if event_index % 2 else "left_tom_hit"
+    if drum_type == "cymbal":
+        if event.velocity >= 0.9 and event.confidence >= 0.65:
+            return "both_crash"
+        return "left_crash" if event_index % 2 else "right_crash"
+    return DRUMMER_V3_POSE_BY_TYPE.get(drum_type, "downbeat_impact")
+
+
+def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
+    """Map detected drum events to readable Drummer v3 pose/submodel targets."""
+    mapped: list[dict[str, object]] = []
+    for index, event in enumerate(sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9)))):
+        pose = drummer_v3_pose_for_event(event, index)
+        duration = DRUMMER_V3_DURATION_BY_POSE.get(pose, 140)
+        mapped.append(
+            {
+                "timestamp_ms": event.timestamp_ms,
+                "end_ms": event.timestamp_ms + duration,
+                "model": DRUMMER_V3_MODEL,
+                "drum_type": event.drum_type,
+                "pose": pose,
+                "submodels": list(DRUMMER_V3_SUBMODELS_BY_POSE[pose]),
+                "intensity": round(event.velocity, 3),
+                "confidence": event.confidence,
+                "source": event.source,
+            }
+        )
+    return mapped
+
+
 def resolve_drum_streams(
     streams: dict[str, list[DrumEvent]] | None,
     *,
@@ -163,5 +229,6 @@ def resolve_drum_streams(
         "fallback_mode": fallback_mode,
         "events": scheduled,
         "mapped_events": map_events_to_submodels(scheduled),
+        "drummer_v3_pose_events": map_events_to_drummer_v3_poses(scheduled),
         "counts": {key: len([event for event in scheduled if stream_key_for_type(event.drum_type) == key]) for key in DRUM_STREAM_KEYS},
     }
