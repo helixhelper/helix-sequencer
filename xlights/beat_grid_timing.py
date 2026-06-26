@@ -95,7 +95,8 @@ def snap_timing_tracks_in_root(
         name = _timing_name(timing_el)
         if not _should_snap_track(name, include_prefixes, exclude_prefixes):
             continue
-        tracks += 1
+        track_events = 0
+        track_changed = 0
         for node in timing_el.iter():
             if node is timing_el:
                 continue
@@ -123,9 +124,13 @@ def snap_timing_tracks_in_root(
             _set_attr(node, TIME_ATTRS, snapped_start)
             if raw_end_value is not None:
                 _set_attr(node, END_ATTRS, snapped_end)
-            events += 1
+            track_events += 1
             if snapped_start != raw_start or snapped_end != raw_end:
-                changed += 1
+                track_changed += 1
+        if track_events:
+            tracks += 1
+            events += track_events
+            changed += track_changed
     return {
         "enabled": True,
         "tracks_touched": tracks,

@@ -81,7 +81,7 @@ def snap_to_grid(value_ms: int | float, grid_points: Sequence[int]) -> int:
 
     if not grid_points:
         return int(round(value_ms))
-    value = int(round(value_ms))
+    value = float(value_ms)
     idx = bisect_left(grid_points, value)
     if idx <= 0:
         return int(grid_points[0])
