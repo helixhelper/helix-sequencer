@@ -46,10 +46,29 @@ class BirdsongPhraseSnapshot:
     effect: str
     intensity: float
     target_models: tuple[str, ...]
+    spatial_intent: str
+    selection_reason: str
+    score: float
+    score_components: dict[str, float]
 
-    def to_dict(self) -> dict[str, float | int | str | list[str]]:
+    def to_dict(self) -> dict[str, float | int | str | list[str] | dict[str, float]]:
         out = asdict(self)
         out["target_models"] = list(self.target_models)
+        return out
+
+
+@dataclass(frozen=True)
+class BirdsongDecisionReport:
+    enabled: bool
+    skipped_reason: str | None
+    row_count: int
+    phrase_count: int
+    motifs: tuple[str, ...]
+    average_score: float
+
+    def to_dict(self) -> dict[str, bool | float | int | str | None | list[str]]:
+        out = asdict(self)
+        out["motifs"] = list(self.motifs)
         return out
 
 
@@ -57,12 +76,23 @@ class BirdsongPhraseSnapshot:
 class BirdsongRuntimePlan:
     rows: tuple[BirdsongSequenceRow, ...]
     phrase_snapshots: tuple[BirdsongPhraseSnapshot, ...]
+    decision_report: BirdsongDecisionReport
 
-    def to_dict(self) -> dict[str, list[dict[str, object]]]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "rows": [row.to_dict() for row in self.rows],
             "phrase_snapshots": [snapshot.to_dict() for snapshot in self.phrase_snapshots],
+            "decision_report": self.decision_report.to_dict(),
         }
+
+
+@dataclass(frozen=True)
+class _TargetSelection:
+    models: tuple[str, ...]
+    spatial_intent: str
+    selection_reason: str
+    score: float
+    score_components: dict[str, float]
 
 
 def generate_birdsong_rows(
@@ -92,11 +122,12 @@ def plan_birdsong_runtime(
 
     cfg = config or BirdsongRuntimeConfig()
     if not _is_explicitly_enabled(cfg.enabled):
-        return BirdsongRuntimePlan(rows=(), phrase_snapshots=())
+        return _empty_plan(enabled=False, skipped_reason="disabled")
 
     models = _clean_models(model_names)
     if not frames or not models:
-        return BirdsongRuntimePlan(rows=(), phrase_snapshots=())
+        reason = "missing_frames" if not frames else "missing_models"
+        return _empty_plan(enabled=True, skipped_reason=reason)
 
     duration_ms = _safe_positive_int(cfg.duration_ms, default=180, minimum=50)
     target_cap = _safe_positive_int(cfg.max_targets_per_frame, default=3, minimum=1)
@@ -116,7 +147,7 @@ def plan_birdsong_runtime(
         motif = _motif_for_frame(frame)
         effect = _effect_for_motif(motif, frame)
         intensity = _finite01(max(energy, onset))
-        selected = _select_models(models, frame, index, limit=target_cap)
+        selection = _select_model_targets(models, frame, index, limit=target_cap)
         phrases.append(
             BirdsongPhraseSnapshot(
                 phrase_id=f"birdsong_issue2_{len(phrases) + 1:04d}",
@@ -125,10 +156,14 @@ def plan_birdsong_runtime(
                 motif=motif,
                 effect=effect,
                 intensity=intensity,
-                target_models=tuple(selected),
+                target_models=selection.models,
+                spatial_intent=selection.spatial_intent,
+                selection_reason=selection.selection_reason,
+                score=selection.score,
+                score_components=selection.score_components,
             )
         )
-        for step, model in enumerate(selected):
+        for step, model in enumerate(selection.models):
             st = start_ms + (step * 24)
             en = st + duration_ms + int(round(intensity * 80.0))
             rows.append(
@@ -142,7 +177,11 @@ def plan_birdsong_runtime(
                     intensity=intensity,
                 )
             )
-    return BirdsongRuntimePlan(rows=tuple(rows), phrase_snapshots=tuple(phrases))
+    return BirdsongRuntimePlan(
+        rows=tuple(rows),
+        phrase_snapshots=tuple(phrases),
+        decision_report=_decision_report(True, None, rows, phrases),
+    )
 
 
 def write_birdsong_runtime_manifest(
@@ -261,23 +300,189 @@ def _effect_for_motif(motif: str, frame: FeatureStateFrame) -> str:
     return "Single Strand"
 
 
-def _select_models(
+def _select_model_targets(
     models: Sequence[str],
     frame: FeatureStateFrame,
     frame_index: int,
     *,
     limit: int,
-) -> list[str]:
+) -> _TargetSelection:
     if not models:
-        return []
+        return _TargetSelection((), "none", "no_models", 0.0, {})
     count = min(len(models), max(1, limit))
-    if frame.high >= max(frame.low, frame.mid):
-        start = (frame_index * 2) % len(models)
-    elif frame.low >= max(frame.mid, frame.high):
-        start = frame_index % len(models)
-    else:
-        start = (frame_index + int(round(frame.beat_phase * len(models)))) % len(models)
-    return [models[(start + offset) % len(models)] for offset in range(count)]
+    intent = _spatial_intent_for_frame(frame)
+    anchor = _anchor_index(models, intent, frame_index)
+    selected = [anchor]
+    frontier = {anchor}
+    while len(selected) < count:
+        candidates = [
+            index
+            for index in range(len(models))
+            if index not in selected and _is_adjacent_to_any(index, frontier, len(models))
+        ]
+        if not candidates:
+            candidates = [index for index in range(len(models)) if index not in selected]
+        if not candidates:
+            break
+        chosen = max(
+            candidates,
+            key=lambda index: (
+                _model_spatial_score(models[index], intent),
+                _adjacency_score(index, anchor, len(models)),
+                -_ring_distance(index, anchor, len(models)),
+                -index,
+            ),
+        )
+        selected.append(chosen)
+        frontier.add(chosen)
+
+    selected_models = tuple(models[index] for index in selected)
+    spatial_fit = _mean(_model_spatial_score(model, intent) for model in selected_models)
+    adjacency_fit = _mean(_adjacency_score(index, anchor, len(models)) for index in selected)
+    intensity = _finite01(max(frame.energy_smooth if frame.energy_smooth > 0 else frame.energy, frame.onset))
+    score_components = {
+        "spatial_fit": round(spatial_fit, 3),
+        "adjacency_fit": round(adjacency_fit, 3),
+        "intensity": round(intensity, 3),
+    }
+    score = round(
+        (0.50 * score_components["spatial_fit"])
+        + (0.25 * score_components["adjacency_fit"])
+        + (0.25 * score_components["intensity"]),
+        3,
+    )
+    return _TargetSelection(
+        models=selected_models,
+        spatial_intent=intent,
+        selection_reason=f"{intent}_adjacent_ring_score",
+        score=score,
+        score_components=score_components,
+    )
+
+
+def _spatial_intent_for_frame(frame: FeatureStateFrame) -> str:
+    low = _finite01(frame.low)
+    mid = _finite01(frame.mid)
+    high = _finite01(frame.high)
+    if high >= max(low, mid):
+        return "high_sparkle"
+    if low >= max(mid, high):
+        return "ground_pulse"
+    if mid >= max(low, high):
+        return "mid_motion"
+    return "beat_orbit"
+
+
+def _anchor_index(models: Sequence[str], intent: str, frame_index: int) -> int:
+    scores = [_model_spatial_score(model, intent) for model in models]
+    best = max(scores)
+    candidates = [index for index, score in enumerate(scores) if score == best]
+    return candidates[frame_index % len(candidates)]
+
+
+def _model_spatial_score(model: str, intent: str) -> float:
+    name = model.lower()
+    if intent == "high_sparkle":
+        return _token_score(
+            name,
+            preferred=("star", "top", "roof", "mega", "snow", "flake"),
+            secondary=("arch", "window", "spinner"),
+            fallback=0.35,
+        )
+    if intent == "ground_pulse":
+        return _token_score(
+            name,
+            preferred=("ground", "floor", "kick", "bass", "low"),
+            secondary=("arch", "center", "mega"),
+            fallback=0.30,
+        )
+    if intent == "mid_motion":
+        return _token_score(
+            name,
+            preferred=("arch", "window", "center", "mid", "spinner"),
+            secondary=("mega", "star", "roof"),
+            fallback=0.45,
+        )
+    return _token_score(
+        name,
+        preferred=("arch", "spinner", "mega", "center"),
+        secondary=("star", "ground", "roof"),
+        fallback=0.45,
+    )
+
+
+def _token_score(
+    name: str,
+    *,
+    preferred: Sequence[str],
+    secondary: Sequence[str],
+    fallback: float,
+) -> float:
+    if any(token in name for token in preferred):
+        return 1.0
+    if any(token in name for token in secondary):
+        return 0.65
+    return fallback
+
+
+def _is_adjacent_to_any(index: int, frontier: set[int], length: int) -> bool:
+    return any(_ring_distance(index, existing, length) == 1 for existing in frontier)
+
+
+def _ring_distance(left: int, right: int, length: int) -> int:
+    raw = abs(left - right)
+    return min(raw, length - raw)
+
+
+def _adjacency_score(index: int, anchor: int, length: int) -> float:
+    distance = _ring_distance(index, anchor, length)
+    if distance == 0:
+        return 1.0
+    return max(0.0, 1.0 - (distance / max(1, length // 2 + 1)))
+
+
+def _mean(values: Iterable[float]) -> float:
+    items = list(values)
+    if not items:
+        return 0.0
+    return sum(items) / len(items)
+
+
+def _empty_plan(*, enabled: bool, skipped_reason: str) -> BirdsongRuntimePlan:
+    return BirdsongRuntimePlan(
+        rows=(),
+        phrase_snapshots=(),
+        decision_report=BirdsongDecisionReport(
+            enabled=enabled,
+            skipped_reason=skipped_reason,
+            row_count=0,
+            phrase_count=0,
+            motifs=(),
+            average_score=0.0,
+        ),
+    )
+
+
+def _decision_report(
+    enabled: bool,
+    skipped_reason: str | None,
+    rows: Sequence[BirdsongSequenceRow],
+    phrases: Sequence[BirdsongPhraseSnapshot],
+) -> BirdsongDecisionReport:
+    motifs: list[str] = []
+    seen: set[str] = set()
+    for phrase in phrases:
+        if phrase.motif not in seen:
+            seen.add(phrase.motif)
+            motifs.append(phrase.motif)
+    return BirdsongDecisionReport(
+        enabled=enabled,
+        skipped_reason=skipped_reason,
+        row_count=len(rows),
+        phrase_count=len(phrases),
+        motifs=tuple(motifs),
+        average_score=round(_mean(phrase.score for phrase in phrases), 3),
+    )
 
 
 def _finite01(value: object) -> float:
@@ -327,6 +532,7 @@ def _config_to_dict(config: BirdsongRuntimeConfig) -> dict[str, object]:
 
 
 __all__ = [
+    "BirdsongDecisionReport",
     "BirdsongRuntimeConfig",
     "BirdsongRuntimePlan",
     "BirdsongPhraseSnapshot",
