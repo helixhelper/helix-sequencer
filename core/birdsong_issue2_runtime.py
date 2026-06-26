@@ -47,7 +47,7 @@ def generate_birdsong_rows(
     """
 
     cfg = config or BirdsongRuntimeConfig()
-    if not cfg.enabled:
+    if not _is_explicitly_enabled(cfg.enabled):
         return []
 
     models = _clean_models(model_names)
@@ -89,7 +89,12 @@ def generate_birdsong_rows(
     return rows
 
 
-def emit_birdsong_rows(rows: Iterable[BirdsongSequenceRow], add_model) -> int:
+def emit_birdsong_rows(
+    rows: Iterable[BirdsongSequenceRow],
+    add_model,
+    *,
+    strict: bool = False,
+) -> int:
     """Emit rows through the existing add_model callback contract.
 
     Callback results are interpreted when they can confirm placement: bools
@@ -97,20 +102,39 @@ def emit_birdsong_rows(rows: Iterable[BirdsongSequenceRow], add_model) -> int:
     objects confirm one placement. Legacy callbacks commonly return ``None``;
     that result is unknown, so it still counts as one emitted row for backward
     compatibility with the original callback contract.
+
+    Birdsong remains an experimental opt-in path, so callback failures are
+    skipped by default instead of breaking stable sequence generation. Tests can
+    pass ``strict=True`` when they need exception propagation.
     """
 
     count = 0
     for row in rows:
-        result = add_model(
-            row.model,
-            int(row.start_ms),
-            int(row.end_ms),
-            row.label,
-            eff=row.effect,
-            stem="other",
-        )
+        try:
+            result = add_model(
+                row.model,
+                int(row.start_ms),
+                int(row.end_ms),
+                row.label,
+                eff=row.effect,
+                stem="other",
+            )
+        except Exception:
+            if strict:
+                raise
+            continue
         count += _emission_count(result)
     return count
+
+
+def _is_explicitly_enabled(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+    if isinstance(value, int):
+        return value == 1
+    return False
 
 
 def _clean_models(model_names: Sequence[str]) -> list[str]:
