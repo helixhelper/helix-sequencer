@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from pathlib import Path
 
 from core.birdsong_issue2_runtime import (
     BirdsongRuntimeConfig,
     emit_birdsong_rows,
     generate_birdsong_rows,
+    plan_birdsong_runtime,
+    write_birdsong_runtime_manifest,
 )
 from core.feature_state import FeatureState
+
+
+FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "birdsong_issue2" / "runtime_fixture.json"
 
 
 def _frames():
@@ -55,6 +62,30 @@ def _enabled_config(**overrides):
     return BirdsongRuntimeConfig(**values)
 
 
+def _fixture_payload():
+    return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def _fixture_frames(payload):
+    state = FeatureState()
+    frames = []
+    for index, item in enumerate(payload["frames"]):
+        frames.append(
+            state.update(
+                index,
+                energy=item["energy"],
+                onset=item["onset"],
+                centroid=item["centroid"],
+                low=item["low"],
+                mid=item["mid"],
+                high=item["high"],
+                beat_phase=item["beat_phase"],
+                time_s=item["time_s"],
+            )
+        )
+    return frames
+
+
 def test_generate_birdsong_rows_defaults_off() -> None:
     rows = generate_birdsong_rows(_frames(), ["star", "arch"])
 
@@ -96,6 +127,51 @@ def test_generate_birdsong_rows_emits_deterministic_rows_when_enabled() -> None:
         "pulse_cascade",
     }
     assert all(row.end_ms > row.start_ms for row in first)
+
+
+def test_birdsong_fixture_generates_persistent_phrase_plan() -> None:
+    payload = _fixture_payload()
+    frames = _fixture_frames(payload)
+    config = BirdsongRuntimeConfig(**payload["config"])
+
+    plan = plan_birdsong_runtime(frames, payload["model_names"], config=config)
+
+    assert len(plan.rows) == payload["expected"]["row_count"]
+    assert len(plan.phrase_snapshots) == payload["expected"]["phrase_count"]
+    assert [snapshot.motif for snapshot in plan.phrase_snapshots] == payload["expected"]["motifs"]
+    assert [snapshot.phrase_id for snapshot in plan.phrase_snapshots] == [
+        "birdsong_issue2_0001",
+        "birdsong_issue2_0002",
+    ]
+    assert plan.phrase_snapshots[0].target_models == ("ground", "mega")
+    assert plan.phrase_snapshots[1].target_models == ("ground", "mega")
+    assert {row.motif for row in plan.rows} == set(payload["expected"]["motifs"])
+
+
+def test_write_birdsong_runtime_manifest_outputs_repo_safe_contract(tmp_path) -> None:
+    payload = _fixture_payload()
+    frames = _fixture_frames(payload)
+    config = BirdsongRuntimeConfig(**payload["config"])
+    output = tmp_path / "birdsong_runtime_manifest.json"
+
+    written = write_birdsong_runtime_manifest(
+        output,
+        frames,
+        payload["model_names"],
+        config=config,
+    )
+
+    assert written == output
+    manifest = json.loads(output.read_text(encoding="utf-8"))
+    assert manifest["schema"] == "helix.birdsong_issue2.runtime_manifest.v1"
+    assert manifest["status"] == "repo_safe_synthetic_runtime_fixture"
+    assert manifest["feature_frame_count"] == len(payload["frames"])
+    assert manifest["model_names"] == payload["model_names"]
+    assert len(manifest["rows"]) == payload["expected"]["row_count"]
+    assert len(manifest["phrase_snapshots"]) == payload["expected"]["phrase_count"]
+    assert manifest["phrase_snapshots"][0]["phrase_id"] == "birdsong_issue2_0001"
+    assert "audio_path" not in manifest
+    assert "layout_path" not in manifest
 
 
 def test_generate_birdsong_rows_dedupes_models_and_limits_targets() -> None:
