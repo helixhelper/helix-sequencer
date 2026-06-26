@@ -52,6 +52,16 @@
       "pulse_cascade"
     ],
     "phrase_count": 2,
-    "row_count": 4
+    "row_count": 4,
+    "target_models": [
+      [
+        "mega",
+        "star"
+      ],
+      [
+        "ground",
+        "arch"
+      ]
+    ]
   }
 }

@@ -92,6 +92,17 @@ def test_generate_birdsong_rows_defaults_off() -> None:
     assert rows == []
 
 
+def test_plan_birdsong_runtime_reports_disabled_skip() -> None:
+    plan = plan_birdsong_runtime(_frames(), ["star", "arch"])
+
+    assert plan.rows == ()
+    assert plan.phrase_snapshots == ()
+    assert plan.decision_report.enabled is False
+    assert plan.decision_report.skipped_reason == "disabled"
+    assert plan.decision_report.row_count == 0
+    assert plan.decision_report.average_score == 0.0
+
+
 def test_generate_birdsong_rows_requires_explicit_enable_value() -> None:
     disabled_values = (False, None, 0, "0", "false", "no", "off", "")
     for value in disabled_values:
@@ -143,9 +154,36 @@ def test_birdsong_fixture_generates_persistent_phrase_plan() -> None:
         "birdsong_issue2_0001",
         "birdsong_issue2_0002",
     ]
-    assert plan.phrase_snapshots[0].target_models == ("ground", "mega")
-    assert plan.phrase_snapshots[1].target_models == ("ground", "mega")
+    assert [list(snapshot.target_models) for snapshot in plan.phrase_snapshots] == payload["expected"]["target_models"]
+    assert [snapshot.spatial_intent for snapshot in plan.phrase_snapshots] == [
+        "high_sparkle",
+        "ground_pulse",
+    ]
+    assert all(snapshot.selection_reason.endswith("_adjacent_ring_score") for snapshot in plan.phrase_snapshots)
+    assert all(0.0 < snapshot.score <= 1.0 for snapshot in plan.phrase_snapshots)
+    assert all("spatial_fit" in snapshot.score_components for snapshot in plan.phrase_snapshots)
+    assert plan.decision_report.enabled is True
+    assert plan.decision_report.skipped_reason is None
+    assert plan.decision_report.row_count == payload["expected"]["row_count"]
+    assert plan.decision_report.phrase_count == payload["expected"]["phrase_count"]
+    assert list(plan.decision_report.motifs) == payload["expected"]["motifs"]
+    assert plan.decision_report.average_score > 0.0
     assert {row.motif for row in plan.rows} == set(payload["expected"]["motifs"])
+
+
+def test_spatial_targeting_prefers_adjoining_believable_models() -> None:
+    frames = _frames()
+    models = ["star_top", "arch_mid", "ground_floor", "mega_tree"]
+    config = _enabled_config(max_targets_per_frame=2, duration_ms=120)
+
+    plan = plan_birdsong_runtime(frames, models, config=config)
+
+    assert plan.phrase_snapshots[0].spatial_intent == "high_sparkle"
+    assert plan.phrase_snapshots[0].target_models == ("mega_tree", "star_top")
+    assert plan.phrase_snapshots[1].spatial_intent == "ground_pulse"
+    assert plan.phrase_snapshots[1].target_models == ("ground_floor", "arch_mid")
+    assert plan.phrase_snapshots[0].score_components["adjacency_fit"] >= 0.8
+    assert plan.phrase_snapshots[1].score_components["spatial_fit"] >= 0.8
 
 
 def test_write_birdsong_runtime_manifest_outputs_repo_safe_contract(tmp_path) -> None:
@@ -170,6 +208,10 @@ def test_write_birdsong_runtime_manifest_outputs_repo_safe_contract(tmp_path) ->
     assert len(manifest["rows"]) == payload["expected"]["row_count"]
     assert len(manifest["phrase_snapshots"]) == payload["expected"]["phrase_count"]
     assert manifest["phrase_snapshots"][0]["phrase_id"] == "birdsong_issue2_0001"
+    assert manifest["phrase_snapshots"][0]["spatial_intent"] == "high_sparkle"
+    assert manifest["decision_report"]["enabled"] is True
+    assert manifest["decision_report"]["row_count"] == payload["expected"]["row_count"]
+    assert manifest["decision_report"]["average_score"] > 0.0
     assert "audio_path" not in manifest
     assert "layout_path" not in manifest
 
