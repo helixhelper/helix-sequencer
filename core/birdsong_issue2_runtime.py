@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
 import math
+from pathlib import Path
 from typing import Iterable, Sequence
 
 from core.feature_state import FeatureStateFrame
@@ -31,6 +33,37 @@ class BirdsongSequenceRow:
     motif: str
     intensity: float
 
+    def to_dict(self) -> dict[str, float | int | str]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class BirdsongPhraseSnapshot:
+    phrase_id: str
+    frame_index: int
+    start_ms: int
+    motif: str
+    effect: str
+    intensity: float
+    target_models: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, float | int | str | list[str]]:
+        out = asdict(self)
+        out["target_models"] = list(self.target_models)
+        return out
+
+
+@dataclass(frozen=True)
+class BirdsongRuntimePlan:
+    rows: tuple[BirdsongSequenceRow, ...]
+    phrase_snapshots: tuple[BirdsongPhraseSnapshot, ...]
+
+    def to_dict(self) -> dict[str, list[dict[str, object]]]:
+        return {
+            "rows": [row.to_dict() for row in self.rows],
+            "phrase_snapshots": [snapshot.to_dict() for snapshot in self.phrase_snapshots],
+        }
+
 
 def generate_birdsong_rows(
     frames: Sequence[FeatureStateFrame],
@@ -46,17 +79,29 @@ def generate_birdsong_rows(
     altering stable v27.3 output.
     """
 
+    return list(plan_birdsong_runtime(frames, model_names, config=config).rows)
+
+
+def plan_birdsong_runtime(
+    frames: Sequence[FeatureStateFrame],
+    model_names: Sequence[str],
+    *,
+    config: BirdsongRuntimeConfig | None = None,
+) -> BirdsongRuntimePlan:
+    """Build deterministic rows plus phrase snapshots for persistence."""
+
     cfg = config or BirdsongRuntimeConfig()
     if not _is_explicitly_enabled(cfg.enabled):
-        return []
+        return BirdsongRuntimePlan(rows=(), phrase_snapshots=())
 
     models = _clean_models(model_names)
     if not frames or not models:
-        return []
+        return BirdsongRuntimePlan(rows=(), phrase_snapshots=())
 
     duration_ms = _safe_positive_int(cfg.duration_ms, default=180, minimum=50)
     target_cap = _safe_positive_int(cfg.max_targets_per_frame, default=3, minimum=1)
     rows: list[BirdsongSequenceRow] = []
+    phrases: list[BirdsongPhraseSnapshot] = []
 
     for index, frame in enumerate(frames):
         energy = _finite01(frame.energy_smooth if frame.energy_smooth > 0 else frame.energy)
@@ -72,6 +117,17 @@ def generate_birdsong_rows(
         effect = _effect_for_motif(motif, frame)
         intensity = _finite01(max(energy, onset))
         selected = _select_models(models, frame, index, limit=target_cap)
+        phrases.append(
+            BirdsongPhraseSnapshot(
+                phrase_id=f"birdsong_issue2_{len(phrases) + 1:04d}",
+                frame_index=int(frame.frame_index),
+                start_ms=start_ms,
+                motif=motif,
+                effect=effect,
+                intensity=intensity,
+                target_models=tuple(selected),
+            )
+        )
         for step, model in enumerate(selected):
             st = start_ms + (step * 24)
             en = st + duration_ms + int(round(intensity * 80.0))
@@ -86,7 +142,33 @@ def generate_birdsong_rows(
                     intensity=intensity,
                 )
             )
-    return rows
+    return BirdsongRuntimePlan(rows=tuple(rows), phrase_snapshots=tuple(phrases))
+
+
+def write_birdsong_runtime_manifest(
+    path: str | Path,
+    frames: Sequence[FeatureStateFrame],
+    model_names: Sequence[str],
+    *,
+    config: BirdsongRuntimeConfig | None = None,
+) -> Path:
+    """Persist a repo-safe manifest of the guarded Birdsong runtime plan."""
+
+    cfg = config or BirdsongRuntimeConfig()
+    models = _clean_models(model_names)
+    plan = plan_birdsong_runtime(frames, models, config=cfg)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": "helix.birdsong_issue2.runtime_manifest.v1",
+        "status": "repo_safe_synthetic_runtime_fixture",
+        "config": _config_to_dict(cfg),
+        "feature_frame_count": len(frames),
+        "model_names": models,
+        **plan.to_dict(),
+    }
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return target
 
 
 def emit_birdsong_rows(
@@ -240,9 +322,17 @@ def _emission_count(result: object) -> int:
     return 1
 
 
+def _config_to_dict(config: BirdsongRuntimeConfig) -> dict[str, object]:
+    return asdict(config)
+
+
 __all__ = [
     "BirdsongRuntimeConfig",
+    "BirdsongRuntimePlan",
+    "BirdsongPhraseSnapshot",
     "BirdsongSequenceRow",
     "emit_birdsong_rows",
     "generate_birdsong_rows",
+    "plan_birdsong_runtime",
+    "write_birdsong_runtime_manifest",
 ]
