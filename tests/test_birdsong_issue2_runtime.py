@@ -61,6 +61,25 @@ def test_generate_birdsong_rows_defaults_off() -> None:
     assert rows == []
 
 
+def test_generate_birdsong_rows_requires_explicit_enable_value() -> None:
+    disabled_values = (False, None, 0, "0", "false", "no", "off", "")
+    for value in disabled_values:
+        rows = generate_birdsong_rows(
+            _frames(),
+            ["star", "arch"],
+            config=BirdsongRuntimeConfig(enabled=value),
+        )
+        assert rows == []
+
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star", "arch"],
+        config=BirdsongRuntimeConfig(enabled="true", max_targets_per_frame=1),
+    )
+
+    assert rows
+
+
 def test_generate_birdsong_rows_emits_deterministic_rows_when_enabled() -> None:
     frames = _frames()
     models = ["star", "arch", "ground", "mega"]
@@ -145,6 +164,42 @@ def test_emit_counts_int_and_unknown_callback_results() -> None:
 
     assert emit_birdsong_rows(rows, _constant_callback(3)) == 3
     assert emit_birdsong_rows(rows, _constant_callback(None)) == 1
+
+
+def test_emit_skips_callback_failures_by_default() -> None:
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star", "arch"],
+        config=_enabled_config(max_targets_per_frame=1),
+    )
+    calls = 0
+
+    def sometimes_fails(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("simulated placement failure")
+        return True
+
+    assert emit_birdsong_rows(rows, sometimes_fails) == len(rows) - 1
+
+
+def test_emit_can_raise_callback_failures_in_strict_mode() -> None:
+    rows = generate_birdsong_rows(
+        _frames(),
+        ["star"],
+        config=_enabled_config(max_targets_per_frame=1),
+    )[:1]
+
+    def fails(*_args, **_kwargs):
+        raise RuntimeError("simulated placement failure")
+
+    try:
+        emit_birdsong_rows(rows, fails, strict=True)
+    except RuntimeError as exc:
+        assert "simulated placement failure" in str(exc)
+    else:
+        raise AssertionError("strict mode should propagate callback failures")
 
 
 def test_generate_birdsong_rows_sanitizes_invalid_config_values() -> None:
