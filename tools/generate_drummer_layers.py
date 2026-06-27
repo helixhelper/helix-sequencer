@@ -85,6 +85,13 @@ def save_png(path: Path, image: Image.Image, overwrite: bool) -> bool:
     return True
 
 
+def display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def generate(source_path: Path, manifest_path: Path, out_dir: Path, overwrite: bool) -> int:
     manifest = load_manifest(manifest_path)
     canvas = manifest.get("canvas", {})
@@ -106,9 +113,9 @@ def generate(source_path: Path, manifest_path: Path, out_dir: Path, overwrite: b
 
     base_path = out_dir / str(base_file)
     if save_png(base_path, base, overwrite):
-        written.append(str(base_path.relative_to(ROOT)))
+        written.append(display_path(base_path))
     else:
-        skipped.append(str(base_path.relative_to(ROOT)))
+        skipped.append(display_path(base_path))
 
     for layer in manifest.get("layers", []):
         if not isinstance(layer, dict) or not layer.get("file"):
@@ -116,9 +123,9 @@ def generate(source_path: Path, manifest_path: Path, out_dir: Path, overwrite: b
         overlay_path = out_dir / str(layer["file"])
         overlay = make_overlay_placeholder(width, height)
         if save_png(overlay_path, overlay, overwrite):
-            written.append(str(overlay_path.relative_to(ROOT)))
+            written.append(display_path(overlay_path))
         else:
-            skipped.append(str(overlay_path.relative_to(ROOT)))
+            skipped.append(display_path(overlay_path))
 
     print("Generated drummer layer files.")
     if written:
