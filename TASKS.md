@@ -6,8 +6,8 @@ This is the short starting point for humans, Codex-style coding agents, and auto
 
 Before treating a recently closed implementation or validation issue as complete, record:
 
-- [ ] CI status.
-- [ ] Full and targeted test status.
+- [x] CI status for the recovery series through PR #97.
+- [x] Full and targeted test status for the recovery series through PR #97.
 - [ ] Generated XSQ artifacts.
 - [ ] MP4 artifacts.
 - [ ] xLights import evidence.
@@ -24,12 +24,12 @@ Before treating a recently closed implementation or validation issue as complete
 
 ## Current next recommended task
 
-Proceed with Phase 1 from `ROADMAP_BETA_TODO.md`:
+Proceed with the remaining Issue #76 artifact evidence work:
 
-1. Add `requirements-dev.txt`.
-2. Update CI to install from declared requirements only.
-3. Add compile/test/profile-list smoke checks.
-4. Keep this as a small PR before adding GUI behavior changes.
+1. Generate a repo-safe representative XSQ artifact from deterministic/sample inputs.
+2. Run the lightweight preview renderer when inputs are safe and record whether an MP4 was produced.
+3. Capture xLights import/manual review notes separately from automated pytest evidence.
+4. Record controller/channel safety evidence before claiming production readiness.
 
 ## Agent operating checklist
 
