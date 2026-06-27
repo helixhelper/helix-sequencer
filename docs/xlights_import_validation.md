@@ -136,3 +136,39 @@ Helix should preserve:
 - XML stability
 
 across repeated exports.
+
+---
+
+# Evidence Capture
+
+Use the structured evidence recorder so xLights/manual/controller results can be
+attached to Issue #76 or a PR without overstating what happened:
+
+```bash
+python -m tools.capture_xlights_validation_evidence \
+  --artifact-run-url https://github.com/ryankorkowski-boop/helix-sequencer/actions/runs/<run-id> \
+  --artifact-digest sha256:<artifact-digest> \
+  --xsq-import-status not_tested \
+  --preview-render-status rendered \
+  --visual-review-status not_reviewed \
+  --controller-status not_tested \
+  --probe-rest \
+  --notes "Clean-room XSQ/MP4 artifacts generated; xLights GUI import still pending."
+```
+
+The command writes JSON and Markdown under `test_runs/xlights_validation_evidence/`.
+Those files are local evidence artifacts; do not commit private screenshots,
+layouts, templates, or tester media.
+
+## Evidence Status Values
+
+Use these values when recording validation evidence:
+
+- XSQ import: `imported`, `failed`, `blocked`, `not_tested`
+- Preview render: `rendered`, `failed`, `blocked`, `not_tested`
+- Visual review: `passed`, `failed`, `blocked`, `not_reviewed`
+- Controller/channel safety: `passed`, `failed`, `blocked`, `not_tested`
+
+Do not mark Issue #76 xLights/manual/controller items complete unless the
+corresponding evidence record reflects the completed status and links to
+reviewable notes or artifacts.
