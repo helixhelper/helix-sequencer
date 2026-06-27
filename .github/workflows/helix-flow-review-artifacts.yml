@@ -30,8 +30,9 @@ jobs:
 
       - name: Export Helix Flow reports and XSQ
         run: |
+          set -o pipefail
           mkdir -p test_runs/helix_flow_demo
-          python tools/export_birdsong_demo_manifest.py \
+          python -m tools.export_birdsong_demo_manifest \
             --output test_runs/helix_flow_demo/helix_flow_intents.json \
             --quality-report test_runs/helix_flow_demo/helix_flow_quality_report.json \
             --baseline-report test_runs/helix_flow_demo/helix_flow_baseline_report.json \
@@ -47,7 +48,8 @@ jobs:
         id: render_mp4
         continue-on-error: true
         run: |
-          python tools/render_xsq_skeleton_preview.py \
+          set -o pipefail
+          python -m tools.render_xsq_skeleton_preview \
             test_runs/helix_flow_demo/helix_flow_demo.xsq \
             --width 1280 \
             --height 720 \
@@ -56,6 +58,7 @@ jobs:
       - name: Refresh acceptance summary after MP4 exists
         if: always()
         run: |
+          set -o pipefail
           python - <<'PY' 2>&1 | tee test_runs/helix_flow_demo/acceptance.log
           from pathlib import Path
           from tools.export_birdsong_demo_manifest import export_helix_flow_acceptance_summary

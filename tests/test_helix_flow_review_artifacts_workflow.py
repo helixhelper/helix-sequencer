@@ -21,9 +21,11 @@ def test_review_artifact_workflow_exists() -> None:
 def test_review_artifact_workflow_renders_mp4_and_xsq() -> None:
     text = _workflow_text()
 
-    assert 'render_xsq_skeleton_preview.py' in text
+    assert 'python -m tools.export_birdsong_demo_manifest' in text
+    assert 'python -m tools.render_xsq_skeleton_preview' in text
     assert 'helix_flow_demo.xsq' in text
     assert 'helix_flow_demo.mp4' in text
+    assert text.count('set -o pipefail') >= 3
 
 
 def test_review_artifact_workflow_uploads_expected_artifacts() -> None:
