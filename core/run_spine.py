@@ -26,6 +26,13 @@ def _git_commit() -> str | None:
         return None
 
 
+def _split_flag_value(arg: str) -> tuple[str, str | None]:
+    if not arg.startswith("--") or "=" not in arg:
+        return arg, None
+    key, value = arg.split("=", 1)
+    return key, value
+
+
 @dataclass
 class RunConfig:
     profile: str = "master"
@@ -49,20 +56,25 @@ class RunConfig:
         args = list(engine_args or [])
         idx = 0
         while idx < len(args):
-            arg = args[idx]
-            nxt = args[idx + 1] if idx + 1 < len(args) else None
-            if arg == "--template" and nxt is not None:
-                config.template_path = Path(nxt); idx += 2
-            elif arg == "--audio" and nxt is not None:
-                config.audio_path = Path(nxt); idx += 2
-            elif arg == "--layout-file" and nxt is not None:
-                config.layout_path = Path(nxt); idx += 2
-            elif arg == "--output-dir" and nxt is not None:
-                config.output_root = Path(nxt); idx += 2
+            raw = args[idx]
+            arg, inline_value = _split_flag_value(raw)
+            nxt = inline_value if inline_value is not None else (args[idx + 1] if idx + 1 < len(args) else None)
+            consumed = 1 if inline_value is not None else 2
+            if arg in {"--template", "--template-path", "--template_path"} and nxt is not None:
+                config.template_path = Path(nxt); idx += consumed
+            elif arg in {"--audio", "--audio-path", "--audio_path"} and nxt is not None:
+                config.audio_path = Path(nxt); idx += consumed
+            elif arg in {"--layout-file", "--layout", "--layout-path", "--layout_path"} and nxt is not None:
+                config.layout_path = Path(nxt); idx += consumed
+            elif arg in {"--output-dir", "--output-root", "--output_root"} and nxt is not None:
+                config.output_root = Path(nxt); idx += consumed
             elif arg == "--variants" and nxt is not None:
                 try: config.variants = int(nxt)
-                except ValueError: extra.extend([arg, nxt])
-                idx += 2
+                except ValueError:
+                    extra.append(raw)
+                    if inline_value is None:
+                        extra.append(nxt)
+                idx += consumed
             elif arg == "--learning-memory":
                 config.enable_learning_memory = True; idx += 1
             elif arg == "--no-learning-memory":
@@ -71,18 +83,23 @@ class RunConfig:
                 config.power_metadata_path = Path(nxt); idx += 2
             elif arg == "--autosize-controllers":
                 config.autosize_controllers = True; idx += 1
-            elif arg == "--controller-padding" and nxt is not None:
+            elif arg in {"--no-autosize-controllers", "--no_autosize_controllers"}:
+                config.autosize_controllers = False; idx += 1
+            elif arg in {"--controller-padding", "--controller_padding"} and nxt is not None:
                 try: config.controller_padding = int(nxt)
-                except ValueError: extra.extend([arg, nxt])
-                idx += 2
-            elif arg == "--no-effects-orchestrator":
+                except ValueError:
+                    extra.append(raw)
+                    if inline_value is None:
+                        extra.append(nxt)
+                idx += consumed
+            elif arg in {"--no-effects-orchestrator", "--disable-orchestrator"}:
                 config.enable_orchestrator = False; idx += 1
-            elif arg == "--no-orchestrator-template-promotion":
+            elif arg in {"--no-orchestrator-template-promotion", "--no-promote-orchestrated-template"}:
                 config.promote_orchestrated_template = False; idx += 1
             elif arg == "--promote-orchestrated-template":
                 config.promote_orchestrated_template = True; idx += 1
             else:
-                extra.append(arg); idx += 1
+                extra.append(raw); idx += 1
         config.extra_engine_args = tuple(extra)
         return config
 
@@ -104,23 +121,30 @@ class RunConfig:
 
     def validate_inputs(self, require_existing: bool = True) -> list[str]:
         issues: list[str] = []
-        sources = [("audio", self.audio_path), ("template", self.template_path), ("layout", self.layout_path)]
+        sources = [
+            ("audio", "audio_path", self.audio_path),
+            ("template", "template_path", self.template_path),
+            ("layout", "layout_path", self.layout_path),
+        ]
         if require_existing:
-            for label, path in sources:
-                if path is None: issues.append(f"missing {label} path")
-                elif not path.exists(): issues.append(f"{label} path does not exist: {path}")
+            for label, field_name, path in sources:
+                if path is None:
+                    issues.append(f"{field_name} is required ({label} path is required)")
+                elif not path.exists():
+                    issues.append(f"{field_name} does not exist ({label} path does not exist): {path}")
             if self.power_metadata_path is not None and not self.power_metadata_path.exists():
                 issues.append(f"power metadata path does not exist: {self.power_metadata_path}")
-        if self.variants < 1: issues.append("variants must be >= 1")
-        if self.controller_padding < 0: issues.append("controller padding must be >= 0")
+        if self.variants < 1: issues.append("variants must be at least 1")
+        if self.controller_padding < 0: issues.append("controller_padding must be non-negative")
         output = self.output_root.resolve()
-        for label, path in sources:
+        for _label, field_name, path in sources:
             if path is None: continue
             resolved = path.resolve()
             if output == resolved:
-                issues.append(f"output path must not equal {label} source path: {path}")
-            if self.output_root.suffix and output == resolved:
-                issues.append(f"output path would overwrite {label} source file: {path}")
+                issues.append(f"output_root must not be the same path as {field_name}: {path}")
+                issues.append(f"output_root would overwrite {field_name}: {path}")
+            elif output == resolved.parent:
+                issues.append(f"output_root would overlap {field_name}: {path}")
         return issues
 
 

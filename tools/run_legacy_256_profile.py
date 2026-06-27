@@ -40,13 +40,13 @@ def build_legacy_256_command(args: argparse.Namespace) -> list[str]:
         profile.base_profile,
         "--",
         "--template",
-        str(Path(args.template)),
+        _repo_path(args.template),
         "--audio",
-        str(Path(args.audio)),
+        _repo_path(args.audio),
         "--layout-file",
-        str(Path(args.layout_file)),
+        _repo_path(args.layout_file),
         "--output-dir",
-        str(Path(output_dir)),
+        _repo_path(output_dir),
         "--variants",
         str(variants),
         *profile.engine_flags,
@@ -62,6 +62,10 @@ def build_legacy_256_command(args: argparse.Namespace) -> list[str]:
         *engine_args,
     ])
     return build_quality_command(quality_args)
+
+
+def _repo_path(value: str | Path) -> str:
+    return Path(value).as_posix()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
