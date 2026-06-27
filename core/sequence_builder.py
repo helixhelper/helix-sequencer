@@ -23,6 +23,7 @@ BEAT_GRID_FLAGS = {
     "--snap-max-shift-ms",
     "--no-snap",
 }
+BEAT_GRID_VALUE_FLAGS = BEAT_GRID_FLAGS - {"--no-snap"}
 ORCHESTRATOR_ONLY_FLAGS = {
     NO_EFFECTS_ORCHESTRATOR_FLAG,
     PROMOTE_ORCHESTRATOR_TEMPLATE_FLAG,
@@ -73,6 +74,24 @@ def _clean_engine_args(engine_args: list[str] | None) -> list[str] | None:
     return [arg for arg in engine_args if arg not in ORCHESTRATOR_ONLY_FLAGS]
 
 
+def _strip_beat_grid_args(engine_args: list[str] | None) -> list[str] | None:
+    if engine_args is None:
+        return None
+    out: list[str] = []
+    idx = 0
+    while idx < len(engine_args):
+        arg = engine_args[idx]
+        if arg in BEAT_GRID_VALUE_FLAGS:
+            idx += 2
+            continue
+        if arg == "--no-snap":
+            idx += 1
+            continue
+        out.append(arg)
+        idx += 1
+    return out
+
+
 def _has_explicit_beat_grid_args(engine_args: list[str] | None) -> bool:
     return any(arg in BEAT_GRID_FLAGS for arg in (engine_args or []))
 
@@ -119,7 +138,7 @@ def _promote_orchestrated_template(
         return cleaned
     if report is None or not report.invoked or not report.xsq_written or not report.orchestrated_xsq_path:
         return cleaned
-    promoted_template = str(Path(report.orchestrated_xsq_path))
+    promoted_template = Path(report.orchestrated_xsq_path).as_posix()
     return _set_or_replace_arg(list(cleaned or []), "--template", promoted_template)
 
 
@@ -127,16 +146,16 @@ def _record_orchestration_artifacts(ctx: RunContext, report: EffectsOrchestratio
     if report is None:
         return
     artifact_paths = (
-        ("effects_orchestration_report", report.report_path),
-        ("placement_plan", report.placement_plan_path),
-        ("effect_contract", report.effect_contract_path),
-        ("orchestrated_xsq", report.orchestrated_xsq_path),
-        ("xsq_render_report", report.xsq_render_report_path),
+        ("effects_orchestration_report", getattr(report, "report_path", None)),
+        ("placement_plan", getattr(report, "placement_plan_path", None)),
+        ("effect_contract", getattr(report, "effect_contract_path", None)),
+        ("orchestrated_xsq", getattr(report, "orchestrated_xsq_path", None)),
+        ("xsq_render_report", getattr(report, "xsq_render_report_path", None)),
     )
     for kind, path in artifact_paths:
         if path:
             ctx.record_artifact(kind, Path(path))
-    if report.error:
+    if getattr(report, "error", None):
         ctx.record_warning(f"effects_orchestrator: {report.error}")
 
 
@@ -218,7 +237,9 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
         print(f"ERROR: Invalid profile '{profile_id}': {e}", file=sys.stderr)
         raise SystemExit(1)
 
-    engine_args = _apply_prime_beat_grid_defaults(profile.version, engine_args)
+    raw_engine_args = list(engine_args or [])
+    has_explicit_beat_grid_args = _has_explicit_beat_grid_args(raw_engine_args)
+    engine_args = _apply_prime_beat_grid_defaults(profile.version, raw_engine_args)
     resolved_profile_id = getattr(profile, "profile_id", profile_id or engine_profiles.ACTIVE_PROFILE_ID)
 
     try:
@@ -246,6 +267,8 @@ def run_profile(profile_id: str | None, engine_args: list[str] | None = None) ->
             _record_orchestration_artifacts(ctx, report)
 
         effective_engine_args = _promote_orchestrated_template(engine_args, report)
+        if not has_explicit_beat_grid_args:
+            effective_engine_args = _strip_beat_grid_args(effective_engine_args)
         if report is not None and report.invoked and report.xsq_written and effective_engine_args != _clean_engine_args(engine_args):
             print(f"effects_orchestrator: promoted template={report.orchestrated_xsq_path}")
 
