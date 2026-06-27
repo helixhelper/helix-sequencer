@@ -74,6 +74,10 @@ BAND_MODELS: dict[str, list[str]] = {
     spec.model_name: list(spec.submodels)
     for spec in (SINGER, FEMALE_SINGER, GUITARIST, BASSIST, DRUMMER)
 }
+VOCAL_PHONEME_ALIASES: dict[str, str] = {
+    "HX_SNOWMAN_SINGER": "HX_SNOWMAN_SINGER_MOUTH_PHONEME",
+    "HX_SNOWMAN_SINGER_FEMALE": "HX_SNOWMAN_SINGER_FEMALE_MOUTH_PHONEME",
+}
 
 
 def _manifest() -> dict[str, Any]:
@@ -207,6 +211,9 @@ def _add_band_specs(layout_path: Path) -> None:
         )
         for submodel_name in submodels:
             ET.SubElement(model, "subModel", {"name": submodel_name, "line0": "1-4"})
+        phoneme_alias = VOCAL_PHONEME_ALIASES.get(model_name)
+        if phoneme_alias and phoneme_alias not in submodels:
+            ET.SubElement(model, "subModel", {"name": phoneme_alias, "line0": "1-4"})
     members = ",".join(BAND_MODELS)
     ET.SubElement(groups_el, "modelGroup", {"name": "HX_SNOWMAN_BAND", "models": members})
     ET.SubElement(groups_el, "modelGroup", {"name": "HX_SNOWMAN_VOCALS", "models": "HX_SNOWMAN_SINGER,HX_SNOWMAN_SINGER_FEMALE"})
