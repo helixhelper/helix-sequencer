@@ -160,6 +160,17 @@ The command writes JSON and Markdown under `test_runs/xlights_validation_evidenc
 Those files are local evidence artifacts; do not commit private screenshots,
 layouts, templates, or tester media.
 
+To generate a complete local review folder with clean-room XSQ/MP4 artifacts,
+an evidence draft, and manual review steps, run:
+
+```bash
+python -m tools.build_xlights_review_kit \
+  --artifact-run-url https://github.com/ryankorkowski-boop/helix-sequencer/actions/runs/<run-id> \
+  --artifact-digest sha256:<artifact-digest>
+```
+
+The review kit writes to `test_runs/xlights_review_kit/` by default.
+
 ## Evidence Status Values
 
 Use these values when recording validation evidence:
