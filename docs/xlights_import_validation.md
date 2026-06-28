@@ -171,6 +171,24 @@ python -m tools.build_xlights_review_kit \
 
 The review kit writes to `test_runs/xlights_review_kit/` by default.
 
+If xLights REST automation is enabled locally, run a read-only `checkSequence`
+probe against the generated XSQ:
+
+```bash
+python -m tools.check_xlights_rest_sequence \
+  --xsq test_runs/xlights_review_kit/helix_flow_demo.xsq
+```
+
+The command tries the documented local xLights/xFade REST automation ports and
+writes JSON and Markdown under `test_runs/xlights_rest_sequence_check/`. A
+`checked` result is useful supporting evidence that xLights accepted the
+sequence for structural checking. A `blocked` result usually means the REST
+service was not reachable, and a `failed` result means xLights returned a
+non-success response for `checkSequence`.
+
+This helper does not perform manual visual review, controller upload, channel
+safety validation, or physical playback testing.
+
 ## Evidence Status Values
 
 Use these values when recording validation evidence:
