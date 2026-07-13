@@ -267,7 +267,15 @@ All contributions must:
 
 ## 🎵 Sample Songs
 
-The [Google Drive folder](https://drive.google.com/drive/folders/1o9ugqwnoTztpGbJFFZIeYUtcC2ShJOtC) contains songs that I (Ryan Korkowski) have created and own the rights to. These can be used free of charge as long as there's proper attribution to the creator.
+**Sample Songs (Google Drive):** [https://drive.google.com/drive/folders/1o9ugqwnoTztpGbJFFZIeYUtcC2ShJOtC](https://drive.google.com/drive/folders/1o9ugqwnoTztpGbJFFZIeYUtcC2ShJOtC)
+
+These songs were created by Ryan Korkowski, who owns all rights. They are provided free of charge for use with the Helix Sequencer (or other personal/creative projects) under the following conditions:
+
+- **Attribution required**: Credit must be given as "Music by Ryan Korkowski" (or similar clear wording) in any public releases, videos, descriptions, or documentation where the songs are used.
+- **No commercial resale**: The songs themselves may not be sold or redistributed as standalone audio files.
+- **Non-exclusive**: This is a permissive license for good-faith use.
+
+For questions or additional permissions, please contact the repository owner.
 
 ---
 
