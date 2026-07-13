@@ -1,8 +1,8 @@
-# Helix Sequencer
+b# Helix Sequencer
 
 > **Sequencing, simplified.** Audio in. Lights out. Helix.
 
-A Python-based automated sequencing engine for [xLights](https://xlights.org/), transforming audio into synchronized light show sequences.
+A Python-based automated sequencing engine forb [xLights](https://xlights.org/), transforming audio into synchronized light show sequences.
 
 ## 🚀 Quick Start
 
@@ -271,7 +271,7 @@ All contributions must:
 
 These songs were created by Ryan Korkowski, who owns all rights. They are provided free of charge for use with the Helix Sequencer (or other personal/creative projects) under the following conditions:
 
-- **Attribution required**: Credit must be given as "Music by Ryan Korkowski" (or similar clear wording) in any public releases, videos, descriptions, or documentation where the songs are used.
+- **Attribution required**: Credit must be given as "Music by Ryan Korkowski, Music by hardKor, Music by Helix or Music by DJ Grrrinchbbb" (or similar clear wording) in any public releases, videos, descriptions, or documentation where the songs are used.
 - **No commercial resale**: The songs themselves may not be sold or redistributed as standalone audio files.
 - **Non-exclusive**: This is a permissive license for good-faith use.
 
