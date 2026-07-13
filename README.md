@@ -1,117 +1,276 @@
-# xLights Auto Sequencing Core
+# Helix Sequencer
 
-This workspace has been restructured around a smaller active surface:
+> **Sequencing, simplified.** Audio in. Lights out. Helix.
 
-- `core/` contains the sequencing engine, audio analysis, model parsing, and build orchestration.
-- `xlights/` contains the legacy-derived XSQ writer helpers and the effect catalog cache.
-- `tools/` contains shared utilities and preview rendering.
-- `ai/` contains explicit opt-in bridge stubs for future model integrations.
-- `archive/legacy_versions/` preserves older wrappers, lab scripts, and legacy entrypoints.
+A Python-based automated sequencing engine for [xLights](https://xlights.org/), transforming audio into synchronized light show sequences.
 
-## Active Structure
+## 🚀 Quick Start
 
-```text
-core/
-ai/
-xlights/
-tools/
-tests/
-archive/legacy_versions/
-main.py
-README.md
-requirements.txt
-AGENTS.md
-```
+### Prerequisites
 
-## Running The Builder
+- **Python 3.11+** or **3.12** (see [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md))
+- **xLights 2023.x** or **2024.x** (see [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md))
+- Windows 10/11, macOS 12+, or Linux (Ubuntu 20.04+)
+- ~500MB disk space for dependencies
 
-Launch the maintained GUI control center (preferred day-to-day workflow):
+### Installation
 
-```powershell
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/ryankorkowski-boop/helix-sequencer.git
+   cd helix-sequencer
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   python -m pip install --upgrade pip
+   python -m pip install -r requirements.txt
+   ```
+
+3. **Verify installation:**
+   ```bash
+   python main.py --list-profiles
+   ```
+
+### Running the Sequencer
+
+#### GUI (Recommended)
+
+Launch the interactive control center:
+
+```bash
 python gui_launcher.py
 ```
 
-or use:
-
-```powershell
+Or on Windows:
+```bash
 launch_sequencer_app.cmd
 ```
 
-List active sequencing profiles:
+#### Command Line
 
-```powershell
+List available profiles:
+```bash
 python main.py --list-profiles
 ```
 
-Run the active master profile and pass through engine arguments:
-
-```powershell
-python main.py --profile master -- --template template.xsq --audio 13.wav --no-prompt
+Run the active master profile:
+```bash
+python main.py --profile master -- \
+  --audio song.mp3 \
+  --template template.xsq \
+  --output-root outputs/
 ```
 
-Legacy version IDs still work as explicit compatibility fallbacks:
-
-```powershell
-python main.py --profile v27.3 -- --template template.xsq --audio 13.wav --no-prompt
+Run a specific version:
+```bash
+python main.py --profile v27.3 -- \
+  --audio song.mp3 \
+  --template template.xsq
 ```
 
-## Helixville Layout Builders
+## 📖 Documentation
 
-Build or refresh the dedicated Helixville 3D test show folder from your allmodels / GP baseline:
+| Document | Purpose |
+|---|---|
+| [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) | Supported OS, Python, xLights versions |
+| [BETA_POLICY.md](docs/BETA_POLICY.md) | Data privacy & beta commitments |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute & development setup |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Community guidelines |
+| [ROADMAP_BETA_TODO.md](ROADMAP_BETA_TODO.md) | Feature roadmap & priorities |
 
-```powershell
-python tools/build_helixville_layout.py
+## 🏗️ Project Structure
+
+```
+core/              # Sequencing engine, audio analysis, orchestration
+xlights/           # xLights file format (XSQ) writer and effect catalog
+tools/             # Shared utilities and preview rendering
+ai/                # Optional AI bridge stubs for future integrations
+tests/             # Comprehensive test suite
+docs/              # Documentation
+main.py            # CLI entrypoint
+gui_launcher.py    # GUI entrypoint
 ```
 
-Output is written to `helixville/`, including:
+## 🧪 Development
 
-- `helixville/xlights_rgbeffects.xml`
-- `helixville/xlights_rgbeffects.xbkp` (when source backup exists)
-- `helixville/helixville_manifest.json`
+### Setup
 
-Build the aligned legacy-256 based Helixville3 layout with lyric/singing-face groups:
+```bash
+# Install dev dependencies (includes pytest, flake8, mypy)
+python -m pip install -r requirements-dev.txt
 
-```powershell
-python tools/build_helixville3_layout.py
+# Run tests
+python -m pytest -q
+
+# Run linting
+flake8 core ai xlights tools tests
+mypy core ai xlights tools --ignore-missing-imports
+
+# Run security checks
+bandit -r core ai xlights tools
 ```
 
-Output is written to `helixville3/`, including:
+### Testing
 
-- `helixville3/xlights_rgbeffects.xml`
-- `helixville3/helixville3_manifest.json`
-- `helixville3/HELIXVILLE3_LAYOUT_NOTES.txt`
-
-Legal source notes:
-- `docs/helixville3_legal_sources_2026-04-23.md`
-
-## hardKor AC Placement
-
-Enable the AC-first hardKor placement machine:
-
-```powershell
-python main.py --profile v27.3 -- --template template.xsq --audio 13.wav --hardkor --ac-lights-only --no-prompt
+Run the full test suite:
+```bash
+python -m pytest -q --cov=core --cov=ai --cov=xlights --cov=tools
 ```
 
-hardKor rules and source references:
-- `docs/hardkor_rulebook_2026-04-23.md`
-
-## AAATEST Variant Pack
-
-Generate a multi-variant comparison pack (`.xsq` + `.mp4`) using `13.wav`:
-
-```powershell
-python tools/generate_aaatest_pack.py
+Run specific test:
+```bash
+python -m pytest tests/test_sequence_builder.py -v
 ```
 
-Outputs are written to `aaatest/`.
+Run the beta smoke wrapper:
+```bash
+scripts/run_smoke.sh
+```
 
-## Notes
+On Windows PowerShell:
+```powershell
+./scripts/run_smoke.ps1
+```
 
-- The active maintained entrypoint is the `master` profile, currently backed by the stable `v27.3` tuning inside `core/effect_engine.py`.
-- Legacy wrappers and experimental scripts were moved instead of deleted.
-- The current restructure is intentionally conservative: proven engine code was promoted into the new folders with minimal behavioral changes.
-- AI bridges are placeholders by design. Rule-based sequencing remains the default path.
+The smoke wrapper covers compile/profile-list checks, selected contract tests, and the clean-room beta demo fixture. It does not prove xLights import success, visual quality, controller/channel safety, or production readiness.
 
-## Learning Policy
+## 🔧 Configuration
 
-Helix scoring memory is limited to Helix-generated sequence reports that carry the internal Dream Sequence Weaver watermark metadata. It does not learn from copyrighted songs, licensed vendor sequences, template files, imported third-party XSQs, or arbitrary user-provided sequence folders. Audio analysis may guide a one-time render, but persistent learning stores only Helix decisions, generated-score metrics, and generated sequence context.
+### Engine Arguments
+
+Passed after `--` when using CLI:
+
+```bash
+python main.py -- --audio file.mp3 --template template.xsq
+```
+
+Common arguments:
+- `--audio FILE` — Audio file to sequence
+- `--template FILE` — xLights template XSQ
+- `--layout FILE` — xLights layout XML
+- `--output-root DIR` — Output directory (default: `outputs/`)
+- `--variants N` — Generate N variant outputs (default: 1)
+- `--enable-learning-memory` — Enable learning from prior runs
+- `--controller-padding N` — Padding around controllers (default: 50)
+
+### Run Tracking
+
+Each execution creates a timestamped directory with:
+- `command.txt` — Full invocation command
+- `run_manifest.json` — Status, artifacts, timing, errors
+- Generated `.xsq` files and logs
+
+Example manifest:
+```json
+{
+  "schema": "helix.run_manifest.v1",
+  "status": "completed",
+  "run_id": "20260603_100130_123",
+  "profile": "master",
+  "started_at": "2026-06-03T10:01:30Z",
+  "finished_at": "2026-06-03T10:05:45Z",
+  "success": true,
+  "artifacts": [
+    {
+      "kind": "effect_placement",
+      "path": "outputs/20260603_100130_123/sequence.xsq",
+      "recorded_at": "2026-06-03T10:05:45Z"
+    }
+  ],
+  "errors": []
+}
+```
+
+## 📊 Architecture
+
+### Core Components
+
+**RunConfig** — Structured configuration from CLI arguments
+- Defines output location, audio/template paths, enable/disable flags
+- Bidirectional conversion to/from CLI arguments
+
+**RunManager** — Lifecycle tracking for each execution
+- Creates timestamped run directory
+- Records artifacts and manifest
+- Captures success/failure with error summaries
+
+**SequenceBuilder** — Main orchestration
+- Parses arguments and creates RunConfig
+- Wraps engine execution in try/except
+- Manages effects orchestration and template promotion
+
+**EffectEngine** — Audio → effects transformation
+- Analyzes audio features (tempo, energy, pitch)
+- Places effects on xLights models
+- Generates XSQ output
+
+## 🐛 Troubleshooting
+
+### Installation Issues
+
+**Problem:** `pip install` fails on librosa or numpy
+```bash
+# Solution: Ensure Python 3.11+ and upgrade pip
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
+```
+
+**Problem:** xLights file not found
+```bash
+# Solution: Use absolute paths or verify file exists
+python main.py -- --template /full/path/to/template.xsq --audio /full/path/to/audio.mp3
+```
+
+### Runtime Issues
+
+**Problem:** Run fails with error in manifest
+```bash
+# Solution: Check run_manifest.json in the timestamped output directory
+cat outputs/20260603_100130_123/run_manifest.json
+```
+
+**Problem:** Type checking warnings from mypy
+```bash
+# Solution: These are usually safe to ignore; use --ignore-missing-imports
+mypy core --ignore-missing-imports
+```
+
+## 📝 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Code Quality
+
+All contributions must:
+- ✅ Pass `pytest`
+- ✅ Pass `flake8` linting
+- ✅ Pass `mypy` type checking
+- ✅ Include docstrings and tests
+- ✅ Follow [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## 💬 Support
+
+- **Questions?** → [GitHub Discussions](https://github.com/ryankorkowski-boop/helix-sequencer/discussions)
+- **Found a bug?** → [GitHub Issues](https://github.com/ryankorkowski-boop/helix-sequencer/issues)
+- **Security concern?** → See [BETA_POLICY.md](docs/BETA_POLICY.md#bug-reports-and-feature-requests)
+
+## 📚 Additional Resources
+
+- [xLights Documentation](https://xlights.org/)
+- [xLights GitHub](https://github.com/xLights/xLights)
+- [Python 3.12 Docs](https://docs.python.org/3.12/)
+
+## 🎵 Sample Songs
+
+The [Google Drive folder](https://drive.google.com/drive/folders/1o9ugqwnoTztpGbJFFZIeYUtcC2ShJOtC) contains songs that I (Ryan Korkowski) have created and own the rights to. These can be used free of charge as long as there's proper attribution to the creator.
+
+---
+
+**Status:** Beta 🧪
+
+For the latest roadmap and known limitations, see [ROADMAP_BETA_TODO.md](ROADMAP_BETA_TODO.md) and [SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md).
