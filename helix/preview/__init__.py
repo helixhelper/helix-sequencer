@@ -5,5 +5,15 @@ Provides timeline-driven preview rendering helpers without requiring xLights.
 
 from .renderer import FrameRenderer
 from .timeline import Timeline, TimelineEvent
+from .simulator import PreviewConfig, PreviewSimulator
+from .layout import PreviewChannel, PreviewLayout
 
-__all__ = ["FrameRenderer", "Timeline", "TimelineEvent"]
+__all__ = [
+    "FrameRenderer",
+    "Timeline",
+    "TimelineEvent",
+    "PreviewConfig",
+    "PreviewSimulator",
+    "PreviewChannel",
+    "PreviewLayout",
+]
