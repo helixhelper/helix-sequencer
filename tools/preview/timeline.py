@@ -6,11 +6,23 @@ from typing import Any
 
 @dataclass(order=True)
 class PreviewEvent:
-    """A synchronized animation event."""
+    """A synchronized animation event.
+
+    Payload may contain instrument-specific information such as:
+    {"instrument": "kick", "strength": 0.92}
+    """
 
     time: float
     action: str
     payload: dict[str, Any] = field(default_factory=dict, compare=False)
+    strength: float = field(default=1.0, compare=False)
+    instrument: str = field(default="generic", compare=False)
+
+    def __post_init__(self) -> None:
+        if "strength" in self.payload:
+            self.strength = float(self.payload["strength"])
+        if "instrument" in self.payload:
+            self.instrument = str(self.payload["instrument"])
 
 
 class PreviewTimeline:
