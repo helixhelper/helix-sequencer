@@ -7,6 +7,7 @@ from .renderer import FrameRenderer
 from .timeline import Timeline, TimelineEvent
 from .simulator import PreviewConfig, PreviewSimulator
 from .layout import PreviewChannel, PreviewLayout
+from .effect_adapter import EffectPlacement, EffectPreviewAdapter
 
 __all__ = [
     "FrameRenderer",
@@ -16,4 +17,6 @@ __all__ = [
     "PreviewSimulator",
     "PreviewChannel",
     "PreviewLayout",
+    "EffectPlacement",
+    "EffectPreviewAdapter",
 ]
