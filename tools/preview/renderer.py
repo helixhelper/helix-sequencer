@@ -1,21 +1,23 @@
-"""Frame renderer skeleton for Helix previews."""
+"""Frame renderer for Helix preview scenes."""
 
+from .compositor import SpriteCompositor
+from .poses import POSES
 from .timeline import PreviewTimeline
 
 
 class PreviewRenderer:
-    def __init__(self, timeline: PreviewTimeline, width: int = 1280, height: int = 720):
+    def __init__(self, timeline: PreviewTimeline, asset_dir: str, width: int = 1280, height: int = 720):
         self.timeline = timeline
-        self.width = width
-        self.height = height
+        self.compositor = SpriteCompositor(asset_dir, (width, height))
+
+    def pose_for_time(self, timestamp: float):
+        events = self.timeline.active_at(timestamp)
+        if not events:
+            return POSES["idle"]
+
+        action = events[-1].action
+        return POSES.get(action, POSES["idle"])
 
     def render_frame(self, timestamp: float):
-        """Render a frame from active timeline events.
-
-        Pillow/moviepy integration will be added in the export milestone.
-        """
-        return {
-            "timestamp": timestamp,
-            "events": [e.action for e in self.timeline.active_at(timestamp)],
-            "size": (self.width, self.height),
-        }
+        pose = self.pose_for_time(timestamp)
+        return self.compositor.render(pose.active_layers)
