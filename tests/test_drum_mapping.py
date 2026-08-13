@@ -22,6 +22,18 @@ class DrumMappingTests(unittest.TestCase):
         self.assertIn("kick", types)
         self.assertIn("snare", types)
 
+
+    def test_typed_detection_keeps_missing_legacy_kick_channel(self) -> None:
+        streams = empty_drum_streams()
+        streams["snare_events"] = [_event(200, "snare")]
+
+        resolved = resolve_drum_streams(streams, fallback_kicks=[100])
+        types = [event.drum_type for event in resolved["events"]]
+
+        self.assertEqual(resolved["fallback_mode"], "typed_detection_plus_missing_legacy_marks")
+        self.assertIn("kick", types)
+        self.assertIn("snare", types)
+
     def test_scheduler_prioritizes_dense_hits_and_reduces_repeats(self) -> None:
         events = [
             _event(100, "hihat"),
