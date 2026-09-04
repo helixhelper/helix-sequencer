@@ -13,6 +13,10 @@ from core.run_config import RunConfig
 
 MANIFEST_SCHEMA = "helix.run_manifest.v1"
 APP_NAME = "Helix Sequencer"
+REDACTED_VALUE = "<redacted>"
+SENSITIVE_COMMAND_FLAGS = {
+    "--moises-api-key",
+}
 
 
 @dataclass(frozen=True)
@@ -153,10 +157,10 @@ class RunManager:
 
     def _command(self, command: Sequence[str] | str | None) -> list[str]:
         if command is None:
-            return ["main.py", *self.config.to_engine_args()]
+            return _redact_command_parts(["main.py", *self.config.to_engine_args()])
         if isinstance(command, str):
-            return [command]
-        return [str(part) for part in command]
+            return [_redact_command_text(command)]
+        return _redact_command_parts([str(part) for part in command])
 
     def _sync_from_context(self, ctx: RunContext) -> None:
         self.run_id = ctx.run_id
@@ -203,6 +207,53 @@ def _manifest_data(ctx: RunContext) -> dict[str, object]:
     }
 
 
+def _redact_command_parts(parts: Sequence[str]) -> list[str]:
+    redacted: list[str] = []
+    idx = 0
+    values = [str(part) for part in parts]
+    while idx < len(values):
+        part = values[idx]
+        lowered = part.lower()
+        matched_flag = next(
+            (flag for flag in SENSITIVE_COMMAND_FLAGS if lowered == flag or lowered.startswith(f"{flag}=")),
+            None,
+        )
+        if matched_flag is None:
+            redacted.append(part)
+            idx += 1
+            continue
+        if "=" in part:
+            redacted.append(f"{part.split('=', 1)[0]}={REDACTED_VALUE}")
+            idx += 1
+            continue
+        redacted.append(part)
+        if idx + 1 < len(values):
+            redacted.append(REDACTED_VALUE)
+            idx += 2
+        else:
+            idx += 1
+    return redacted
+
+
+def _redact_command_text(command: str) -> str:
+    redacted = str(command)
+    for flag in SENSITIVE_COMMAND_FLAGS:
+        escaped = re.escape(flag)
+        redacted = re.sub(
+            rf"({escaped}=)([^\s]+)",
+            rf"\1{REDACTED_VALUE}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+        redacted = re.sub(
+            rf"({escaped})(\s+)([^\s]+)",
+            rf"\1\2{REDACTED_VALUE}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+    return redacted
+
+
 def _path_value(path: Path | None) -> str | None:
     return str(path) if path is not None else None
 
@@ -234,7 +285,7 @@ def _next_run_dir(parent: Path, run_id: str) -> Path:
 
 def _format_command(command: Sequence[str] | str | None, command_list: list[str]) -> str:
     if isinstance(command, str):
-        return command
+        return command_list[0]
     return " ".join(command_list)
 
 
