@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 import wave
@@ -33,6 +32,20 @@ def _duration(path: Path) -> float:
 def _run(command: list[str]) -> None:
     print(" ".join(command), flush=True)
     subprocess.run(command, cwd=ROOT, check=True)
+
+
+def _next_run_dir(output_dir: Path, audio_stem: str) -> Path:
+    """Choose a new run directory without deleting existing E2E artifacts."""
+    root = output_dir.resolve()
+    candidate = root / audio_stem
+    if not candidate.exists():
+        return candidate
+    index = 1
+    while True:
+        candidate = root / f"{audio_stem}-{index}"
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 def _inspect_xsq(path: Path) -> dict[str, Any]:
@@ -97,14 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     audio = args.audio.resolve()
-    run_dir = (args.output_dir / audio.stem).resolve()
-    if run_dir.exists():
-        shutil.rmtree(run_dir)
+    run_dir = _next_run_dir(args.output_dir, audio.stem)
     run_dir.mkdir(parents=True)
     media_dir = run_dir / "media"
     media_dir.mkdir()
     copied_audio = media_dir / audio.name
-    shutil.copy2(audio, copied_audio)
+    copied_audio.write_bytes(audio.read_bytes())
     manifest: dict[str, Any] = {
         "status": "failed",
         "input_audio": str(copied_audio),
