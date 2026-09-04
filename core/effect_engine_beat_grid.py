@@ -132,6 +132,58 @@ def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
     return sorted(outputs, key=lambda path: str(path))
 
 
+def _requested_audio_paths(argv: Iterable[str]) -> list[Path]:
+    """Return audio paths explicitly supplied to the effect engine."""
+
+    args = list(argv)
+    requested: list[Path] = []
+    idx = 0
+    while idx < len(args):
+        raw = args[idx]
+        if raw == "--audio":
+            idx += 1
+            while idx < len(args) and not args[idx].startswith("--"):
+                requested.append(Path(args[idx]))
+                idx += 1
+            continue
+        if raw.startswith("--audio="):
+            value = raw.split("=", 1)[1].strip()
+            if value:
+                requested.append(Path(value))
+        idx += 1
+    return requested
+
+
+def _verify_requested_xsq_outputs(version: str, argv: list[str], *, since: float) -> list[Path]:
+    """Fail if an explicitly requested song returned without a fresh XSQ.
+
+    The legacy effect engine catches per-song exceptions so it can continue a
+    batch. Without this guard that can make the outer run manager finalize a
+    failed or partially failed run as successful.
+    """
+
+    requested = _requested_audio_paths(argv)
+    if not requested:
+        return []
+    try:
+        config = RunConfig.from_engine_args("engine", argv)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to verify generated XSQ outputs: {exc}") from exc
+    outputs = _recent_xsq_outputs(_artifact_search_roots(config, version), since=since)
+    missing = [
+        audio
+        for audio in requested
+        if not any(path.name.startswith(f"{audio.stem},{version}") for path in outputs)
+    ]
+    if missing:
+        missing_text = ", ".join(str(path) for path in missing)
+        raise RuntimeError(
+            "Effect engine returned without producing a fresh XSQ for requested audio: "
+            f"{missing_text}"
+        )
+    return outputs
+
+
 def autosize_controller_sidecars(version: str, argv: list[str], *, since: float) -> dict[str, Any] | None:
     """Copy or synthesize xlights_networks.xml beside freshly rendered XSQ files."""
 
@@ -172,6 +224,7 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     options = parse_beat_grid_runtime_args(argv or [])
     cleaned_args = list(options.cleaned_args)
     effect_engine.main_for(version, cleaned_args)
+    _verify_requested_xsq_outputs(version, cleaned_args, since=started)
     controller_summary = autosize_controller_sidecars(version, cleaned_args, since=started)
     if controller_summary is not None:
         if controller_summary.get("enabled"):
