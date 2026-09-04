@@ -29,6 +29,42 @@ def test_main_for_raises_when_engine_returns_without_requested_output(tmp_path, 
         )
 
 
+def test_preexisting_recent_xsq_does_not_count_as_fresh_output(tmp_path, monkeypatch) -> None:
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    existing = output_root / "song,v27.3.xsq"
+    existing.write_text("<xsequence />", encoding="utf-8")
+
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", lambda _version, _argv: None)
+
+    with pytest.raises(RuntimeError, match="returned without producing a fresh XSQ"):
+        effect_engine_beat_grid.main_for(
+            "v27.3",
+            ["--audio", str(audio), "--output-dir", str(output_root)],
+        )
+
+
+def test_existing_xsq_that_changes_during_run_counts_as_fresh(tmp_path, monkeypatch) -> None:
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    existing = output_root / "song,v27.3.xsq"
+    existing.write_text("old", encoding="utf-8")
+
+    def fake_main_for(_version: str, _argv: list[str]) -> None:
+        existing.write_text("new sequence content", encoding="utf-8")
+
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", fake_main_for)
+
+    effect_engine_beat_grid.main_for(
+        "v27.3",
+        ["--audio", str(audio), "--output-dir", str(output_root)],
+    )
+
+
 def test_main_for_reports_only_missing_song_from_partial_batch(tmp_path, monkeypatch) -> None:
     first = tmp_path / "first.wav"
     second = tmp_path / "second.wav"
