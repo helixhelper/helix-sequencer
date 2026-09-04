@@ -230,6 +230,8 @@ def resolve_drum_streams(
         if {event.drum_type for event in events} != present_types:
             fallback_mode = "typed_detection_plus_missing_legacy_marks"
         if bus_events and typed_count < max(2, len(bus_events) // 2):
+            bus_event_ids = {id(event) for event in bus_events}
+            events = [event for event in events if id(event) not in bus_event_ids]
             events.extend(distribute_drum_bus_events(bus_events))
             fallback_mode = "partial_detection_plus_bus"
     scheduled = schedule_drum_events(events, config)
