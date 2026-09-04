@@ -121,6 +121,43 @@ def _artifact_search_roots(config: RunConfig, version: str) -> list[Path]:
     return unique
 
 
+def _xsq_snapshot(roots: Iterable[Path]) -> dict[Path, tuple[int, int]]:
+    snapshot: dict[Path, tuple[int, int]] = {}
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.xsq"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            snapshot[path.resolve(strict=False)] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def _changed_xsq_outputs(
+    roots: Iterable[Path],
+    before: dict[Path, tuple[int, int]],
+) -> list[Path]:
+    outputs: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.xsq"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            resolved = path.resolve(strict=False)
+            if before.get(resolved) != (stat.st_mtime_ns, stat.st_size):
+                outputs.append(path)
+    return sorted(outputs, key=lambda path: str(path))
+
+
 def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
     outputs: list[Path] = []
     for root in roots:
@@ -154,8 +191,13 @@ def _requested_audio_paths(argv: Iterable[str]) -> list[Path]:
     return requested
 
 
-def _verify_requested_xsq_outputs(version: str, argv: list[str], *, since: float) -> list[Path]:
-    """Fail if an explicitly requested song returned without a fresh XSQ."""
+def _verify_requested_xsq_outputs(
+    version: str,
+    argv: list[str],
+    *,
+    before: dict[Path, tuple[int, int]],
+) -> list[Path]:
+    """Fail unless every explicitly requested song created or changed an XSQ."""
 
     requested = _requested_audio_paths(argv)
     if not requested:
@@ -164,7 +206,7 @@ def _verify_requested_xsq_outputs(version: str, argv: list[str], *, since: float
         config = RunConfig.from_engine_args("engine", argv)
     except Exception as exc:
         raise RuntimeError(f"Unable to verify generated XSQ outputs: {exc}") from exc
-    outputs = _recent_xsq_outputs(_artifact_search_roots(config, version), since=since)
+    outputs = _changed_xsq_outputs(_artifact_search_roots(config, version), before)
     missing = [
         audio
         for audio in requested
@@ -258,8 +300,15 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     started = time.time()
     options = parse_beat_grid_runtime_args(argv or [])
     cleaned_args = list(options.cleaned_args)
+    try:
+        config = RunConfig.from_engine_args("engine", cleaned_args)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to snapshot generated XSQ outputs: {exc}") from exc
+    roots = _artifact_search_roots(config, version)
+    before_xsq = _xsq_snapshot(roots)
+
     _run_effect_engine_with_failure_capture(version, cleaned_args)
-    _verify_requested_xsq_outputs(version, cleaned_args, since=started)
+    _verify_requested_xsq_outputs(version, cleaned_args, before=before_xsq)
     controller_summary = autosize_controller_sidecars(version, cleaned_args, since=started)
     if controller_summary is not None:
         if controller_summary.get("enabled"):
