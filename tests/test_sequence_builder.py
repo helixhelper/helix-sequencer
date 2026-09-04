@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from core import effect_engine
 from core import engine_profiles
@@ -29,6 +31,28 @@ class SequenceBuilderTests(unittest.TestCase):
         roots = sequence_builder._artifact_search_roots(RunConfig(output_root=Path("outputs")), "v27.3")
 
         self.assertEqual(roots, [Path("outputs"), Path("v27")])
+
+    def test_run_profile_forwards_prime_defaults_to_beat_grid_wrapper(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_engine = SimpleNamespace(main_for=Mock())
+            with patch.object(sequence_builder, "_effect_engine", return_value=fake_engine):
+                sequence_builder.run_profile(
+                    "master",
+                    ["--output-dir", tmp, "--no-effects-orchestrator", "--birdsong"],
+                )
+
+            forwarded = fake_engine.main_for.call_args.args[1]
+            self.assertIn("--snap-grid", forwarded)
+            self.assertIn("--snap-bpm", forwarded)
+            self.assertIn("--birdsong", forwarded)
+            self.assertNotIn("--no-effects-orchestrator", forwarded)
+
+    def test_explicit_no_snap_is_not_replaced_by_prime_defaults(self) -> None:
+        args = sequence_builder._apply_prime_beat_grid_defaults("v27.3", ["--no-snap", "--quiet"])
+
+        self.assertEqual(args, ["--no-snap", "--quiet"])
 
     def test_record_changed_artifacts_adds_known_outputs_to_manifest_file(self) -> None:
         import tempfile
