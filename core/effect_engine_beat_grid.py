@@ -155,12 +155,7 @@ def _requested_audio_paths(argv: Iterable[str]) -> list[Path]:
 
 
 def _verify_requested_xsq_outputs(version: str, argv: list[str], *, since: float) -> list[Path]:
-    """Fail if an explicitly requested song returned without a fresh XSQ.
-
-    The legacy effect engine catches per-song exceptions so it can continue a
-    batch. Without this guard that can make the outer run manager finalize a
-    failed or partially failed run as successful.
-    """
+    """Fail if an explicitly requested song returned without a fresh XSQ."""
 
     requested = _requested_audio_paths(argv)
     if not requested:
@@ -182,6 +177,51 @@ def _verify_requested_xsq_outputs(version: str, argv: list[str], *, since: float
             f"{missing_text}"
         )
     return outputs
+
+
+def _run_effect_engine_with_failure_capture(version: str, argv: list[str]) -> None:
+    """Promote the legacy engine's swallowed per-song FAILED logs to an exception."""
+
+    failures: list[str] = []
+    original_log = effect_engine.log
+
+    def capture_log(message: str) -> None:
+        text = str(message)
+        if text.lstrip().startswith("FAILED:"):
+            failures.append(text.strip())
+        original_log(message)
+
+    effect_engine.log = capture_log
+    try:
+        effect_engine.main_for(version, argv)
+    finally:
+        effect_engine.log = original_log
+    if failures:
+        details = " | ".join(failures[:8])
+        if len(failures) > 8:
+            details += f" | ... and {len(failures) - 8} more"
+        raise RuntimeError(f"Effect engine reported generation failure(s): {details}")
+
+
+def _postprocess_beat_grid_for_run(version: str, argv: list[str], beat_grid, *, since: float) -> dict[str, Any]:
+    """Postprocess only this run's configured output roots, not the whole repo."""
+
+    try:
+        config = RunConfig.from_engine_args("engine", argv)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to scope BeatGrid postprocessing: {exc}") from exc
+    summaries = [
+        postprocess_beat_grid_outputs(root, beat_grid, since=since)
+        for root in _artifact_search_roots(config, version)
+    ]
+    return {
+        "enabled": True,
+        "reports_touched": sum(int(item.get("reports_touched", 0)) for item in summaries),
+        "snowman_exports_touched": sum(int(item.get("snowman_exports_touched", 0)) for item in summaries),
+        "roots": [str(item.get("root", "")) for item in summaries],
+        "subdivision": beat_grid.subdivision,
+        "mode": beat_grid.mode,
+    }
 
 
 def autosize_controller_sidecars(version: str, argv: list[str], *, since: float) -> dict[str, Any] | None:
@@ -213,17 +253,12 @@ def autosize_controller_sidecars(version: str, argv: list[str], *, since: float)
 
 
 def main_for(version: str, argv: list[str] | None = None) -> None:
-    """Run effect_engine while consuming BeatGrid runtime flags.
-
-    This keeps the existing effect_engine stable: unknown BeatGrid flags are
-    stripped before the legacy parser sees them, and generated report sidecars
-    are upgraded with raw/snapped timing metadata afterward.
-    """
+    """Run effect_engine while consuming BeatGrid runtime flags."""
 
     started = time.time()
     options = parse_beat_grid_runtime_args(argv or [])
     cleaned_args = list(options.cleaned_args)
-    effect_engine.main_for(version, cleaned_args)
+    _run_effect_engine_with_failure_capture(version, cleaned_args)
     _verify_requested_xsq_outputs(version, cleaned_args, since=started)
     controller_summary = autosize_controller_sidecars(version, cleaned_args, since=started)
     if controller_summary is not None:
@@ -236,7 +271,7 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
         else:
             effect_engine.log(f"Controller autosize skipped: {controller_summary.get('error')}")
     if options.snap_timing and options.beat_grid is not None:
-        summary = postprocess_beat_grid_outputs(Path("."), options.beat_grid, since=started)
+        summary = _postprocess_beat_grid_for_run(version, cleaned_args, options.beat_grid, since=started)
         effect_engine.log(
             "BeatGrid postprocess: "
             f"reports={summary['reports_touched']} snowman={summary['snowman_exports_touched']} "
