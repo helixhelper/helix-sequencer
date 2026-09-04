@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import wave
@@ -115,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     media_dir = run_dir / "media"
     media_dir.mkdir()
     copied_audio = media_dir / audio.name
-    copied_audio.write_bytes(audio.read_bytes())
+    shutil.copy2(audio, copied_audio)
     manifest: dict[str, Any] = {
         "status": "failed",
         "input_audio": str(copied_audio),
