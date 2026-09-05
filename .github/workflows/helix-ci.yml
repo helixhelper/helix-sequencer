@@ -51,6 +51,7 @@ jobs:
             tests/test_drum_mapping.py \
             tests/test_run_helix_e2e.py \
             tests/test_run_manager_redaction.py \
+            tests/test_run_spine_redaction.py \
             tests/test_effects_orchestrator_bridge.py \
             tests/test_xlights_contract_validator.py \
             tests/test_explainable_variant_scoring.py \
