@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -112,6 +113,76 @@ def test_main_for_promotes_swallowed_failed_log_even_when_xsq_exists(tmp_path, m
         )
 
     assert effect_engine_beat_grid.effect_engine.log is quiet_log
+
+
+def test_main_for_fails_when_controller_autosize_lacks_layout(tmp_path, monkeypatch) -> None:
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"")
+    output_root = tmp_path / "outputs"
+
+    def fake_main_for(_version: str, _argv: list[str]) -> None:
+        output_root.mkdir(parents=True, exist_ok=True)
+        (output_root / "song,v27.3.xsq").write_text("<xsequence />", encoding="utf-8")
+
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", fake_main_for)
+
+    with pytest.raises(RuntimeError, match="--autosize-controllers requires --layout-file"):
+        effect_engine_beat_grid.main_for(
+            "v27.3",
+            [
+                "--audio",
+                str(audio),
+                "--output-dir",
+                str(output_root),
+                "--autosize-controllers",
+            ],
+        )
+
+
+def test_controller_autosize_targets_only_xsqs_changed_by_this_run(tmp_path, monkeypatch) -> None:
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    old_xsq = output_root / "old,v27.3.xsq"
+    old_xsq.write_text("old sequence", encoding="utf-8")
+    layout = tmp_path / "layout.xml"
+    layout.write_text("<layout />", encoding="utf-8")
+    written_targets: list[Path] = []
+
+    def fake_main_for(_version: str, _argv: list[str]) -> None:
+        (output_root / "song,v27.3.xsq").write_text("new sequence", encoding="utf-8")
+
+    def fake_write(_plan, targets):
+        written_targets.extend(Path(path) for path in targets)
+        return [output_root / "xlights_networks.xml"]
+
+    plan = SimpleNamespace(
+        source=str(layout),
+        channel_count=100,
+        layout_channel_count=100,
+        synthesized_null_controller=False,
+    )
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", fake_main_for)
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "log", lambda _message: None)
+    monkeypatch.setattr(effect_engine_beat_grid, "build_controller_plan", lambda _path, padding: plan)
+    monkeypatch.setattr(effect_engine_beat_grid, "write_networks_for_xsq_outputs", fake_write)
+
+    effect_engine_beat_grid.main_for(
+        "v27.3",
+        [
+            "--audio",
+            str(audio),
+            "--output-dir",
+            str(output_root),
+            "--autosize-controllers",
+            "--layout-file",
+            str(layout),
+        ],
+    )
+
+    assert written_targets == [output_root / "song,v27.3.xsq"]
+    assert old_xsq not in written_targets
 
 
 def test_beat_grid_postprocess_is_scoped_to_configured_output_root(tmp_path, monkeypatch) -> None:
