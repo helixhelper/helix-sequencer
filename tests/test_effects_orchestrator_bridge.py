@@ -3,13 +3,33 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.effects_orchestrator_bridge import build_seed_graph, run_effects_orchestration, visual_intents_from_graph
+from core.effects_orchestrator_bridge import (
+    _arg_value,
+    build_seed_graph,
+    orchestration_report_path,
+    run_effects_orchestration,
+    visual_intents_from_graph,
+)
 
 
 def test_seed_graph_has_canonical_show_sections() -> None:
     graph = build_seed_graph(["--audio", "LightsOutTheme.wav", "--duration", "40"])
     assert len(graph.intents) == 5
     assert graph.ordered_sections() == ("intro", "verse", "build", "chorus", "finale")
+
+
+def test_inline_arg_values_match_split_form(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    inline = ["--audio=LightsOutTheme.wav", f"--output-dir={output_dir}", "--duration=40"]
+
+    assert _arg_value(inline, "--audio") == "LightsOutTheme.wav"
+    assert _arg_value(inline, "--output-dir") == str(output_dir)
+    assert _arg_value(inline, "--duration") == "40"
+    assert orchestration_report_path(inline) == output_dir / "LightsOutTheme.effects_orchestration.json"
+
+    graph = build_seed_graph(inline)
+    assert len(graph.intents) == 5
+    assert graph.intents[0].duration == 8.0
 
 
 def test_final_graph_converts_to_visual_intents() -> None:
@@ -100,3 +120,24 @@ def test_effects_orchestrator_writes_orchestrated_xsq_when_template_is_available
     assert render_report["effect_count"] == report.xsq_effect_count
     assert render_report["native_effect_count"] == report.xsq_effect_count
     assert render_report["contract_effect_count"] == report.xsq_effect_count
+
+
+def test_effects_orchestrator_accepts_inline_template_and_output_args(tmp_path: Path) -> None:
+    output_dir = tmp_path / "inline-out"
+    template = tmp_path / "inline-template.xsq"
+    template.write_text("<?xml version='1.0' encoding='UTF-8'?><xsequence><ElementEffects /></xsequence>\n", encoding="utf-8")
+
+    report = run_effects_orchestration(
+        [
+            "--audio=InlineSong.wav",
+            f"--template={template}",
+            f"--output-dir={output_dir}",
+            "--duration=30",
+        ],
+        write_report=True,
+    )
+
+    assert report.invoked is True
+    assert report.xsq_written is True
+    assert Path(report.report_path or "") == output_dir / "InlineSong.effects_orchestration.json"
+    assert Path(report.orchestrated_xsq_path or "") == output_dir / "InlineSong.orchestrated.xsq"
