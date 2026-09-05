@@ -67,15 +67,36 @@ def _apply_to_report_payload(payload: dict[str, Any], beat_grid) -> dict[str, An
     return payload
 
 
-def postprocess_beat_grid_outputs(root: Path, beat_grid, *, since: float | None = None) -> dict[str, Any]:
-    """Apply BeatGrid metadata/snapping to freshly generated report sidecars."""
+def postprocess_beat_grid_outputs(
+    root: Path,
+    beat_grid,
+    *,
+    since: float | None = None,
+    allowed_xsq_outputs: Iterable[Path] | None = None,
+) -> dict[str, Any]:
+    """Apply BeatGrid metadata/snapping to sidecars associated with this run's XSQs."""
 
     touched_reports = 0
     touched_snowman = 0
     scan_root = root.resolve()
+    allowed_reports: set[Path] | None = None
+    allowed_snowman: set[Path] | None = None
+    if allowed_xsq_outputs is not None:
+        outputs = list(allowed_xsq_outputs)
+        allowed_reports = {
+            path.with_name(f"{path.stem}.report.json").resolve(strict=False)
+            for path in outputs
+        }
+        allowed_snowman = {
+            path.with_name(f"{path.stem}.snowman_band.json").resolve(strict=False)
+            for path in outputs
+        }
+
     reports = list(scan_root.rglob(REPORT_GLOB))
     snowman_files = list(scan_root.rglob(SNOWMAN_GLOB))
     for path in reports:
+        if allowed_reports is not None and path.resolve(strict=False) not in allowed_reports:
+            continue
         if since is not None and not _is_recent(path, since):
             continue
         payload = _json_read(path)
@@ -86,6 +107,8 @@ def postprocess_beat_grid_outputs(root: Path, beat_grid, *, since: float | None 
         _json_write(path, _apply_to_report_payload(payload, beat_grid))
         touched_reports += 1
     for path in snowman_files:
+        if allowed_snowman is not None and path.resolve(strict=False) not in allowed_snowman:
+            continue
         if since is not None and not _is_recent(path, since):
             continue
         payload = _json_read(path)
@@ -245,15 +268,28 @@ def _run_effect_engine_with_failure_capture(version: str, argv: list[str]) -> No
         raise RuntimeError(f"Effect engine reported generation failure(s): {details}")
 
 
-def _postprocess_beat_grid_for_run(version: str, argv: list[str], beat_grid, *, since: float) -> dict[str, Any]:
-    """Postprocess only this run's configured output roots, not the whole repo."""
+def _postprocess_beat_grid_for_run(
+    version: str,
+    argv: list[str],
+    beat_grid,
+    *,
+    since: float,
+    xsq_outputs: Iterable[Path] | None = None,
+) -> dict[str, Any]:
+    """Postprocess only sidecars belonging to this run's configured outputs."""
 
     try:
         config = RunConfig.from_engine_args("engine", argv)
     except Exception as exc:
         raise RuntimeError(f"Unable to scope BeatGrid postprocessing: {exc}") from exc
+    outputs = list(xsq_outputs) if xsq_outputs is not None else None
     summaries = [
-        postprocess_beat_grid_outputs(root, beat_grid, since=since)
+        postprocess_beat_grid_outputs(
+            root,
+            beat_grid,
+            since=since,
+            allowed_xsq_outputs=outputs,
+        )
         for root in _artifact_search_roots(config, version)
     ]
     return {
@@ -318,6 +354,7 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     before_xsq = _xsq_snapshot(roots)
 
     _run_effect_engine_with_failure_capture(version, cleaned_args)
+    changed_xsq = _changed_xsq_outputs(roots, before_xsq)
     _verify_requested_xsq_outputs(version, cleaned_args, before=before_xsq)
     controller_summary = autosize_controller_sidecars(
         version,
@@ -332,7 +369,13 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
             f"sidecars={len(controller_summary['sidecars'])}"
         )
     if options.snap_timing and options.beat_grid is not None:
-        summary = _postprocess_beat_grid_for_run(version, cleaned_args, options.beat_grid, since=started)
+        summary = _postprocess_beat_grid_for_run(
+            version,
+            cleaned_args,
+            options.beat_grid,
+            since=started,
+            xsq_outputs=changed_xsq,
+        )
         effect_engine.log(
             "BeatGrid postprocess: "
             f"reports={summary['reports_touched']} snowman={summary['snowman_exports_touched']} "
