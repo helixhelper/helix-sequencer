@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
+
+
+REDACTED_VALUE = "<redacted>"
+SENSITIVE_COMMAND_FLAGS = {
+    "--moises-api-key",
+}
 
 
 def _utc_now() -> str:
@@ -31,6 +38,85 @@ def _split_flag_value(arg: str) -> tuple[str, str | None]:
         return arg, None
     key, value = arg.split("=", 1)
     return key, value
+
+
+def _extract_sensitive_values(command: Sequence[str]) -> tuple[str, ...]:
+    found: list[str] = []
+    values = [str(part) for part in command]
+    idx = 0
+    while idx < len(values):
+        part = values[idx]
+        lowered = part.lower()
+        matched_flag = next(
+            (flag for flag in SENSITIVE_COMMAND_FLAGS if lowered == flag or lowered.startswith(f"{flag}=")),
+            None,
+        )
+        if matched_flag is None:
+            idx += 1
+            continue
+        if "=" in part:
+            value = part.split("=", 1)[1]
+            if value:
+                found.append(value)
+            idx += 1
+            continue
+        if idx + 1 < len(values):
+            value = values[idx + 1]
+            if value:
+                found.append(value)
+            idx += 2
+        else:
+            idx += 1
+    return tuple(dict.fromkeys(found))
+
+
+def _redact_command_parts(parts: Sequence[str]) -> list[str]:
+    redacted: list[str] = []
+    values = [str(part) for part in parts]
+    idx = 0
+    while idx < len(values):
+        part = values[idx]
+        lowered = part.lower()
+        matched_flag = next(
+            (flag for flag in SENSITIVE_COMMAND_FLAGS if lowered == flag or lowered.startswith(f"{flag}=")),
+            None,
+        )
+        if matched_flag is None:
+            redacted.append(part)
+            idx += 1
+            continue
+        if "=" in part:
+            redacted.append(f"{part.split('=', 1)[0]}={REDACTED_VALUE}")
+            idx += 1
+            continue
+        redacted.append(part)
+        if idx + 1 < len(values):
+            redacted.append(REDACTED_VALUE)
+            idx += 2
+        else:
+            idx += 1
+    return redacted
+
+
+def _redact_runtime_text(text: str, sensitive_values: Sequence[str]) -> str:
+    redacted = str(text)
+    for value in sorted((str(item) for item in sensitive_values if item), key=len, reverse=True):
+        redacted = redacted.replace(value, REDACTED_VALUE)
+    for flag in SENSITIVE_COMMAND_FLAGS:
+        escaped = re.escape(flag)
+        redacted = re.sub(
+            rf"({escaped}=)([^\s]+)",
+            rf"\1{REDACTED_VALUE}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+        redacted = re.sub(
+            rf"({escaped})(\s+)([^\s]+)",
+            rf"\1\2{REDACTED_VALUE}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+    return redacted
 
 
 @dataclass
@@ -80,7 +166,7 @@ class RunConfig:
             elif arg == "--no-learning-memory":
                 config.enable_learning_memory = False; idx += 1
             elif arg == "--power-metadata-file" and nxt is not None:
-                config.power_metadata_path = Path(nxt); idx += 2
+                config.power_metadata_path = Path(nxt); idx += consumed
             elif arg == "--autosize-controllers":
                 config.autosize_controllers = True; idx += 1
             elif arg in {"--no-autosize-controllers", "--no_autosize_controllers"}:
@@ -180,13 +266,16 @@ class RunManager:
         self.artifacts: list[RunArtifact] = []
         self.warnings: list[str] = []
         self.errors: list[str] = []
-        self.command = list(command) if command is not None else [sys.argv[0], *config.to_engine_args()]
+        raw_command = list(command) if command is not None else [sys.argv[0], *config.to_engine_args()]
+        self._sensitive_values = _extract_sensitive_values(raw_command)
+        self.command = _redact_command_parts(raw_command)
         self.context = RunContext(config, self.run_id, self.run_dir, self.manifest_path, self.command_path, self.log_path, self.artifacts)
         self.command_path.write_text(" ".join(self.command), encoding="utf-8")
         self.log_path.write_text("", encoding="utf-8")
         self._write_manifest(status="started", success=False, finished_at=None, error_summary=None)
 
     def _manifest(self, *, status: str, success: bool, finished_at: str | None, error_summary: str | None) -> dict[str, Any]:
+        safe_summary = _redact_runtime_text(error_summary, self._sensitive_values) if error_summary is not None else None
         return {
             "schema": "helix.run_manifest.v1",
             "app": "Helix Sequencer",
@@ -200,12 +289,12 @@ class RunManager:
             "layout_path": str(self.config.layout_path) if self.config.layout_path else None,
             "output_root": str(self.config.output_root),
             "run_dir": str(self.run_dir),
-            "command": self.command,
+            "command": list(self.command),
             "artifacts": [artifact.__dict__ for artifact in self.artifacts],
-            "warnings": list(self.warnings),
-            "errors": list(self.errors),
+            "warnings": [_redact_runtime_text(item, self._sensitive_values) for item in self.warnings],
+            "errors": [_redact_runtime_text(item, self._sensitive_values) for item in self.errors],
             "success": success,
-            "error_summary": error_summary,
+            "error_summary": safe_summary,
             "git_commit": _git_commit(),
         }
 
@@ -220,19 +309,20 @@ class RunManager:
         return artifact
 
     def record_warning(self, message: str) -> None:
-        self.warnings.append(str(message))
+        self.warnings.append(_redact_runtime_text(message, self._sensitive_values))
         self._write_manifest(status="started", success=False, finished_at=None, error_summary=None)
 
     def record_error(self, message: str) -> None:
-        self.errors.append(str(message))
+        self.errors.append(_redact_runtime_text(message, self._sensitive_values))
         self._write_manifest(status="started", success=False, finished_at=None, error_summary=None)
 
     def finalize(self, success: bool, error_summary: str | None = None) -> None:
-        if error_summary:
-            self.errors.append(error_summary)
+        safe_summary = _redact_runtime_text(error_summary, self._sensitive_values) if error_summary is not None else None
+        if safe_summary:
+            self.errors.append(safe_summary)
         self._write_manifest(
             status="completed" if success else "failed",
             success=bool(success),
             finished_at=_utc_now(),
-            error_summary=error_summary,
+            error_summary=safe_summary,
         )

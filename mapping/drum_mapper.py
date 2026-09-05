@@ -221,7 +221,17 @@ def resolve_drum_streams(
     else:
         events = flatten_drum_streams(streams)
         fallback_mode = "typed_detection"
+        fallback_streams = build_streams_from_legacy(fallback_kicks, fallback_snares, fallback_hats, fallback_cymbals)
+        present_types = {event.drum_type for event in events}
+        for key in DRUM_STREAM_KEYS:
+            for event in fallback_streams.get(key, []):
+                if event.drum_type not in present_types:
+                    events.append(event)
+        if {event.drum_type for event in events} != present_types:
+            fallback_mode = "typed_detection_plus_missing_legacy_marks"
         if bus_events and typed_count < max(2, len(bus_events) // 2):
+            bus_event_ids = {id(event) for event in bus_events}
+            events = [event for event in events if id(event) not in bus_event_ids]
             events.extend(distribute_drum_bus_events(bus_events))
             fallback_mode = "partial_detection_plus_bus"
     scheduled = schedule_drum_events(events, config)

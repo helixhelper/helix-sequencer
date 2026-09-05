@@ -54,9 +54,12 @@ class EffectsOrchestrationRunReport:
 
 def _arg_value(engine_args: list[str] | None, flag: str) -> str | None:
     args = engine_args or []
+    prefix = f"{flag}="
     for idx, item in enumerate(args):
         if item == flag and idx + 1 < len(args):
             return args[idx + 1]
+        if item.startswith(prefix):
+            return item[len(prefix):]
     return None
 
 
@@ -91,14 +94,13 @@ def xsq_render_report_path(engine_args: list[str] | None) -> Path:
 
 
 def build_seed_graph(engine_args: list[str] | None = None) -> IntentGraph:
-    args = engine_args or []
     song_length_seconds = 30.0
-    for idx, item in enumerate(args):
-        if item in {"--duration", "--seconds"} and idx + 1 < len(args):
-            try:
-                song_length_seconds = max(8.0, float(args[idx + 1]))
-            except ValueError:
-                pass
+    raw_duration = _arg_value(engine_args, "--duration") or _arg_value(engine_args, "--seconds")
+    if raw_duration is not None:
+        try:
+            song_length_seconds = max(8.0, float(raw_duration))
+        except ValueError:
+            pass
     section_count = 5
     section_duration = max(1.0, song_length_seconds / section_count)
     sections = ("intro", "verse", "build", "chorus", "finale")

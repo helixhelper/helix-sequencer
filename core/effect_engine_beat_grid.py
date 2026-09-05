@@ -67,15 +67,36 @@ def _apply_to_report_payload(payload: dict[str, Any], beat_grid) -> dict[str, An
     return payload
 
 
-def postprocess_beat_grid_outputs(root: Path, beat_grid, *, since: float | None = None) -> dict[str, Any]:
-    """Apply BeatGrid metadata/snapping to freshly generated report sidecars."""
+def postprocess_beat_grid_outputs(
+    root: Path,
+    beat_grid,
+    *,
+    since: float | None = None,
+    allowed_xsq_outputs: Iterable[Path] | None = None,
+) -> dict[str, Any]:
+    """Apply BeatGrid metadata/snapping to sidecars associated with this run's XSQs."""
 
     touched_reports = 0
     touched_snowman = 0
     scan_root = root.resolve()
+    allowed_reports: set[Path] | None = None
+    allowed_snowman: set[Path] | None = None
+    if allowed_xsq_outputs is not None:
+        outputs = list(allowed_xsq_outputs)
+        allowed_reports = {
+            path.with_name(f"{path.stem}.report.json").resolve(strict=False)
+            for path in outputs
+        }
+        allowed_snowman = {
+            path.with_name(f"{path.stem}.snowman_band.json").resolve(strict=False)
+            for path in outputs
+        }
+
     reports = list(scan_root.rglob(REPORT_GLOB))
     snowman_files = list(scan_root.rglob(SNOWMAN_GLOB))
     for path in reports:
+        if allowed_reports is not None and path.resolve(strict=False) not in allowed_reports:
+            continue
         if since is not None and not _is_recent(path, since):
             continue
         payload = _json_read(path)
@@ -86,6 +107,8 @@ def postprocess_beat_grid_outputs(root: Path, beat_grid, *, since: float | None 
         _json_write(path, _apply_to_report_payload(payload, beat_grid))
         touched_reports += 1
     for path in snowman_files:
+        if allowed_snowman is not None and path.resolve(strict=False) not in allowed_snowman:
+            continue
         if since is not None and not _is_recent(path, since):
             continue
         payload = _json_read(path)
@@ -121,6 +144,43 @@ def _artifact_search_roots(config: RunConfig, version: str) -> list[Path]:
     return unique
 
 
+def _xsq_snapshot(roots: Iterable[Path]) -> dict[Path, tuple[int, int]]:
+    snapshot: dict[Path, tuple[int, int]] = {}
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.xsq"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            snapshot[path.resolve(strict=False)] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def _changed_xsq_outputs(
+    roots: Iterable[Path],
+    before: dict[Path, tuple[int, int]],
+) -> list[Path]:
+    outputs: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.xsq"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            resolved = path.resolve(strict=False)
+            if before.get(resolved) != (stat.st_mtime_ns, stat.st_size):
+                outputs.append(path)
+    return sorted(outputs, key=lambda path: str(path))
+
+
 def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
     outputs: list[Path] = []
     for root in roots:
@@ -132,21 +192,141 @@ def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
     return sorted(outputs, key=lambda path: str(path))
 
 
-def autosize_controller_sidecars(version: str, argv: list[str], *, since: float) -> dict[str, Any] | None:
-    """Copy or synthesize xlights_networks.xml beside freshly rendered XSQ files."""
+def _requested_audio_paths(argv: Iterable[str]) -> list[Path]:
+    """Return audio paths explicitly supplied to the effect engine."""
+
+    args = list(argv)
+    requested: list[Path] = []
+    idx = 0
+    while idx < len(args):
+        raw = args[idx]
+        if raw == "--audio":
+            idx += 1
+            while idx < len(args) and not args[idx].startswith("--"):
+                requested.append(Path(args[idx]))
+                idx += 1
+            continue
+        if raw.startswith("--audio="):
+            value = raw.split("=", 1)[1].strip()
+            if value:
+                requested.append(Path(value))
+        idx += 1
+    return requested
+
+
+def _verify_requested_xsq_outputs(
+    version: str,
+    argv: list[str],
+    *,
+    before: dict[Path, tuple[int, int]],
+) -> list[Path]:
+    """Fail unless every explicitly requested song created or changed an XSQ."""
+
+    requested = _requested_audio_paths(argv)
+    if not requested:
+        return []
+    try:
+        config = RunConfig.from_engine_args("engine", argv)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to verify generated XSQ outputs: {exc}") from exc
+    outputs = _changed_xsq_outputs(_artifact_search_roots(config, version), before)
+    missing = [
+        audio
+        for audio in requested
+        if not any(path.name.startswith(f"{audio.stem},{version}") for path in outputs)
+    ]
+    if missing:
+        missing_text = ", ".join(str(path) for path in missing)
+        raise RuntimeError(
+            "Effect engine returned without producing a fresh XSQ for requested audio: "
+            f"{missing_text}"
+        )
+    return outputs
+
+
+def _run_effect_engine_with_failure_capture(version: str, argv: list[str]) -> None:
+    """Promote the legacy engine's swallowed per-song FAILED logs to an exception."""
+
+    failures: list[str] = []
+    original_log = effect_engine.log
+
+    def capture_log(message: str) -> None:
+        text = str(message)
+        if text.lstrip().startswith("FAILED:"):
+            failures.append(text.strip())
+        original_log(message)
+
+    effect_engine.log = capture_log
+    try:
+        effect_engine.main_for(version, argv)
+    finally:
+        effect_engine.log = original_log
+    if failures:
+        details = " | ".join(failures[:8])
+        if len(failures) > 8:
+            details += f" | ... and {len(failures) - 8} more"
+        raise RuntimeError(f"Effect engine reported generation failure(s): {details}")
+
+
+def _postprocess_beat_grid_for_run(
+    version: str,
+    argv: list[str],
+    beat_grid,
+    *,
+    since: float,
+    xsq_outputs: Iterable[Path] | None = None,
+) -> dict[str, Any]:
+    """Postprocess only sidecars belonging to this run's configured outputs."""
 
     try:
         config = RunConfig.from_engine_args("engine", argv)
     except Exception as exc:
-        return {"enabled": False, "error": f"failed to parse engine args: {exc}"}
+        raise RuntimeError(f"Unable to scope BeatGrid postprocessing: {exc}") from exc
+    outputs = list(xsq_outputs) if xsq_outputs is not None else None
+    summaries = [
+        postprocess_beat_grid_outputs(
+            root,
+            beat_grid,
+            since=since,
+            allowed_xsq_outputs=outputs,
+        )
+        for root in _artifact_search_roots(config, version)
+    ]
+    return {
+        "enabled": True,
+        "reports_touched": sum(int(item.get("reports_touched", 0)) for item in summaries),
+        "snowman_exports_touched": sum(int(item.get("snowman_exports_touched", 0)) for item in summaries),
+        "roots": [str(item.get("root", "")) for item in summaries],
+        "subdivision": beat_grid.subdivision,
+        "mode": beat_grid.mode,
+    }
+
+
+def autosize_controller_sidecars(
+    version: str,
+    argv: list[str],
+    *,
+    since: float,
+    before: dict[Path, tuple[int, int]] | None = None,
+) -> dict[str, Any] | None:
+    """Copy or synthesize xlights_networks.xml beside XSQs changed by this run."""
+
+    try:
+        config = RunConfig.from_engine_args("engine", argv)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to configure controller autosizing: {exc}") from exc
     if not config.autosize_controllers:
         return None
     if config.layout_path is None:
-        return {"enabled": False, "error": "--autosize-controllers requires --layout-file"}
+        raise RuntimeError("--autosize-controllers requires --layout-file")
 
     plan = build_controller_plan(config.layout_path, padding=config.controller_padding)
     roots = _artifact_search_roots(config, version)
-    xsq_outputs = _recent_xsq_outputs(roots, since=since)
+    xsq_outputs = (
+        _changed_xsq_outputs(roots, before)
+        if before is not None
+        else _recent_xsq_outputs(roots, since=since)
+    )
     output_targets = xsq_outputs or [config.output_root]
     sidecars = write_networks_for_xsq_outputs(plan, output_targets)
     return {
@@ -161,29 +341,41 @@ def autosize_controller_sidecars(version: str, argv: list[str], *, since: float)
 
 
 def main_for(version: str, argv: list[str] | None = None) -> None:
-    """Run effect_engine while consuming BeatGrid runtime flags.
-
-    This keeps the existing effect_engine stable: unknown BeatGrid flags are
-    stripped before the legacy parser sees them, and generated report sidecars
-    are upgraded with raw/snapped timing metadata afterward.
-    """
+    """Run effect_engine while consuming BeatGrid runtime flags."""
 
     started = time.time()
     options = parse_beat_grid_runtime_args(argv or [])
     cleaned_args = list(options.cleaned_args)
-    effect_engine.main_for(version, cleaned_args)
-    controller_summary = autosize_controller_sidecars(version, cleaned_args, since=started)
+    try:
+        config = RunConfig.from_engine_args("engine", cleaned_args)
+    except Exception as exc:
+        raise RuntimeError(f"Unable to snapshot generated XSQ outputs: {exc}") from exc
+    roots = _artifact_search_roots(config, version)
+    before_xsq = _xsq_snapshot(roots)
+
+    _run_effect_engine_with_failure_capture(version, cleaned_args)
+    changed_xsq = _changed_xsq_outputs(roots, before_xsq)
+    _verify_requested_xsq_outputs(version, cleaned_args, before=before_xsq)
+    controller_summary = autosize_controller_sidecars(
+        version,
+        cleaned_args,
+        since=started,
+        before=before_xsq,
+    )
     if controller_summary is not None:
-        if controller_summary.get("enabled"):
-            effect_engine.log(
-                "Controller autosize: "
-                f"source={controller_summary['source']} channels={controller_summary['channel_count']} "
-                f"sidecars={len(controller_summary['sidecars'])}"
-            )
-        else:
-            effect_engine.log(f"Controller autosize skipped: {controller_summary.get('error')}")
+        effect_engine.log(
+            "Controller autosize: "
+            f"source={controller_summary['source']} channels={controller_summary['channel_count']} "
+            f"sidecars={len(controller_summary['sidecars'])}"
+        )
     if options.snap_timing and options.beat_grid is not None:
-        summary = postprocess_beat_grid_outputs(Path("."), options.beat_grid, since=started)
+        summary = _postprocess_beat_grid_for_run(
+            version,
+            cleaned_args,
+            options.beat_grid,
+            since=started,
+            xsq_outputs=changed_xsq,
+        )
         effect_engine.log(
             "BeatGrid postprocess: "
             f"reports={summary['reports_touched']} snowman={summary['snowman_exports_touched']} "

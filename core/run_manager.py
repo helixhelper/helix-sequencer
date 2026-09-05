@@ -13,6 +13,10 @@ from core.run_config import RunConfig
 
 MANIFEST_SCHEMA = "helix.run_manifest.v1"
 APP_NAME = "Helix Sequencer"
+REDACTED_VALUE = "<redacted>"
+SENSITIVE_COMMAND_FLAGS = {
+    "--moises-api-key",
+}
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,7 @@ class RunContext:
     success: bool = False
     error_summary: str | None = None
     _manager: "RunManager | None" = field(default=None, repr=False, compare=False)
+    _sensitive_values: tuple[str, ...] = field(default_factory=tuple, repr=False, compare=False)
     _finalized: bool = field(default=False, repr=False, compare=False)
 
     def __enter__(self) -> "RunContext":
@@ -61,20 +66,25 @@ class RunContext:
         return artifact
 
     def record_warning(self, warning: str) -> None:
-        self.warnings.append(warning)
+        self.warnings.append(_redact_runtime_text(warning, self._sensitive_values))
         self._write_manifest()
 
     def record_error(self, error: str) -> None:
-        self.errors.append(error)
+        self.errors.append(_redact_runtime_text(error, self._sensitive_values))
         self._write_manifest()
 
     def finalize(self, *, success: bool, error_summary: str | None = None) -> None:
         self.finished_at = _now_iso()
         self.success = success
         self.status = "success" if success else "failed"
-        self.error_summary = error_summary
-        if error_summary:
-            self.errors.append(error_summary)
+        safe_summary = (
+            _redact_runtime_text(error_summary, self._sensitive_values)
+            if error_summary is not None
+            else None
+        )
+        self.error_summary = safe_summary
+        if safe_summary:
+            self.errors.append(safe_summary)
         self._finalized = True
         self._write_manifest()
 
@@ -112,6 +122,12 @@ class RunManager:
         run_dir = _next_run_dir(self.config.output_root / "beta", run_id)
         run_dir.mkdir(parents=True, exist_ok=False)
 
+        raw_command: Sequence[str] | str = (
+            ["main.py", *self.config.to_engine_args()]
+            if command is None
+            else command
+        )
+        sensitive_values = _extract_sensitive_values(raw_command)
         command_list = self._command(command)
         command_path = run_dir / "command.txt"
         command_path.write_text(_format_command(command, command_list) + "\n", encoding="utf-8")
@@ -128,6 +144,7 @@ class RunManager:
             command=command_list,
             started_at=_now_iso(),
             _manager=self,
+            _sensitive_values=sensitive_values,
         )
         self.context = ctx
         self._sync_from_context(ctx)
@@ -153,10 +170,10 @@ class RunManager:
 
     def _command(self, command: Sequence[str] | str | None) -> list[str]:
         if command is None:
-            return ["main.py", *self.config.to_engine_args()]
+            return _redact_command_parts(["main.py", *self.config.to_engine_args()])
         if isinstance(command, str):
-            return [command]
-        return [str(part) for part in command]
+            return [_redact_command_text(command)]
+        return _redact_command_parts([str(part) for part in command])
 
     def _sync_from_context(self, ctx: RunContext) -> None:
         self.run_id = ctx.run_id
@@ -195,12 +212,117 @@ def _manifest_data(ctx: RunContext) -> dict[str, object]:
             {"kind": artifact.kind, "path": artifact.path, "exists": artifact.exists}
             for artifact in ctx.artifacts
         ],
-        "warnings": list(ctx.warnings),
-        "errors": list(ctx.errors),
+        "warnings": [
+            _redact_runtime_text(value, ctx._sensitive_values)
+            for value in ctx.warnings
+        ],
+        "errors": [
+            _redact_runtime_text(value, ctx._sensitive_values)
+            for value in ctx.errors
+        ],
         "success": ctx.success,
-        "error_summary": ctx.error_summary,
+        "error_summary": (
+            _redact_runtime_text(ctx.error_summary, ctx._sensitive_values)
+            if ctx.error_summary is not None
+            else None
+        ),
         "git_commit": _git_commit(),
     }
+
+
+def _extract_sensitive_values(command: Sequence[str] | str) -> tuple[str, ...]:
+    found: list[str] = []
+    if isinstance(command, str):
+        for flag in SENSITIVE_COMMAND_FLAGS:
+            pattern = re.compile(
+                rf"{re.escape(flag)}(?:=|\s+)(\"[^\"]*\"|'[^']*'|[^\s]+)",
+                flags=re.IGNORECASE,
+            )
+            for match in pattern.finditer(command):
+                value = match.group(1).strip().strip("\"'")
+                if value:
+                    found.append(value)
+    else:
+        values = [str(part) for part in command]
+        idx = 0
+        while idx < len(values):
+            part = values[idx]
+            lowered = part.lower()
+            matched_flag = next(
+                (flag for flag in SENSITIVE_COMMAND_FLAGS if lowered == flag or lowered.startswith(f"{flag}=")),
+                None,
+            )
+            if matched_flag is None:
+                idx += 1
+                continue
+            if "=" in part:
+                value = part.split("=", 1)[1]
+                if value:
+                    found.append(value)
+                idx += 1
+                continue
+            if idx + 1 < len(values):
+                value = values[idx + 1]
+                if value:
+                    found.append(value)
+                idx += 2
+            else:
+                idx += 1
+    return tuple(dict.fromkeys(found))
+
+
+def _redact_runtime_text(text: str, sensitive_values: Sequence[str]) -> str:
+    redacted = str(text)
+    for value in sorted((str(item) for item in sensitive_values if item), key=len, reverse=True):
+        redacted = redacted.replace(value, REDACTED_VALUE)
+    return _redact_command_text(redacted)
+
+
+def _redact_command_parts(parts: Sequence[str]) -> list[str]:
+    redacted: list[str] = []
+    idx = 0
+    values = [str(part) for part in parts]
+    while idx < len(values):
+        part = values[idx]
+        lowered = part.lower()
+        matched_flag = next(
+            (flag for flag in SENSITIVE_COMMAND_FLAGS if lowered == flag or lowered.startswith(f"{flag}=")),
+            None,
+        )
+        if matched_flag is None:
+            redacted.append(part)
+            idx += 1
+            continue
+        if "=" in part:
+            redacted.append(f"{part.split('=', 1)[0]}={REDACTED_VALUE}")
+            idx += 1
+            continue
+        redacted.append(part)
+        if idx + 1 < len(values):
+            redacted.append(REDACTED_VALUE)
+            idx += 2
+        else:
+            idx += 1
+    return redacted
+
+
+def _redact_command_text(command: str) -> str:
+    redacted = str(command)
+    for flag in SENSITIVE_COMMAND_FLAGS:
+        escaped = re.escape(flag)
+        redacted = re.sub(
+            rf"({escaped}=)([^\s]+)",
+            rf"\1{REDACTED_VALUE}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+        redacted = re.sub(
+            rf"({escaped})(\s+)([^\s]+)",
+            rf"\1\2{REDACTED_VALUE}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+    return redacted
 
 
 def _path_value(path: Path | None) -> str | None:
@@ -234,7 +356,7 @@ def _next_run_dir(parent: Path, run_id: str) -> Path:
 
 def _format_command(command: Sequence[str] | str | None, command_list: list[str]) -> str:
     if isinstance(command, str):
-        return command
+        return command_list[0]
     return " ".join(command_list)
 
 
