@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -185,6 +186,49 @@ def test_controller_autosize_targets_only_xsqs_changed_by_this_run(tmp_path, mon
     assert old_xsq not in written_targets
 
 
+def test_beat_grid_postprocess_ignores_unrelated_recent_report(tmp_path, monkeypatch) -> None:
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    old_xsq = output_root / "old,v27.3.xsq"
+    old_xsq.write_text("old sequence", encoding="utf-8")
+    old_report = output_root / "old,v27.3.report.json"
+    old_report.write_text(
+        json.dumps({"responsible_use": {"helix_generated_only": True}}),
+        encoding="utf-8",
+    )
+
+    def fake_main_for(_version: str, _argv: list[str]) -> None:
+        (output_root / "song,v27.3.xsq").write_text("new sequence", encoding="utf-8")
+        (output_root / "song,v27.3.report.json").write_text(
+            json.dumps({"responsible_use": {"helix_generated_only": True}}),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", fake_main_for)
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "log", lambda _message: None)
+
+    effect_engine_beat_grid.main_for(
+        "v27.3",
+        [
+            "--snap-grid",
+            "16",
+            "--snap-bpm",
+            "120",
+            "--audio",
+            str(audio),
+            "--output-dir",
+            str(output_root),
+        ],
+    )
+
+    old_payload = json.loads(old_report.read_text(encoding="utf-8"))
+    new_payload = json.loads((output_root / "song,v27.3.report.json").read_text(encoding="utf-8"))
+    assert "beat_grid" not in old_payload
+    assert new_payload["beat_grid"]["snapped"] is True
+
+
 def test_beat_grid_postprocess_is_scoped_to_configured_output_root(tmp_path, monkeypatch) -> None:
     audio = tmp_path / "song.wav"
     audio.write_bytes(b"")
@@ -195,8 +239,15 @@ def test_beat_grid_postprocess_is_scoped_to_configured_output_root(tmp_path, mon
         output_root.mkdir(parents=True, exist_ok=True)
         (output_root / "song,v27.3.xsq").write_text("<xsequence />", encoding="utf-8")
 
-    def fake_postprocess(root: Path, beat_grid, *, since: float | None = None) -> dict[str, object]:
+    def fake_postprocess(
+        root: Path,
+        beat_grid,
+        *,
+        since: float | None = None,
+        allowed_xsq_outputs=None,
+    ) -> dict[str, object]:
         scanned_roots.append(root)
+        assert allowed_xsq_outputs == [output_root / "song,v27.3.xsq"]
         return {
             "enabled": True,
             "reports_touched": 0,
