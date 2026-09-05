@@ -44,6 +44,7 @@ class RunContext:
     success: bool = False
     error_summary: str | None = None
     _manager: "RunManager | None" = field(default=None, repr=False, compare=False)
+    _sensitive_values: tuple[str, ...] = field(default_factory=tuple, repr=False, compare=False)
     _finalized: bool = field(default=False, repr=False, compare=False)
 
     def __enter__(self) -> "RunContext":
@@ -65,20 +66,25 @@ class RunContext:
         return artifact
 
     def record_warning(self, warning: str) -> None:
-        self.warnings.append(warning)
+        self.warnings.append(_redact_runtime_text(warning, self._sensitive_values))
         self._write_manifest()
 
     def record_error(self, error: str) -> None:
-        self.errors.append(error)
+        self.errors.append(_redact_runtime_text(error, self._sensitive_values))
         self._write_manifest()
 
     def finalize(self, *, success: bool, error_summary: str | None = None) -> None:
         self.finished_at = _now_iso()
         self.success = success
         self.status = "success" if success else "failed"
-        self.error_summary = error_summary
-        if error_summary:
-            self.errors.append(error_summary)
+        safe_summary = (
+            _redact_runtime_text(error_summary, self._sensitive_values)
+            if error_summary is not None
+            else None
+        )
+        self.error_summary = safe_summary
+        if safe_summary:
+            self.errors.append(safe_summary)
         self._finalized = True
         self._write_manifest()
 
@@ -116,6 +122,12 @@ class RunManager:
         run_dir = _next_run_dir(self.config.output_root / "beta", run_id)
         run_dir.mkdir(parents=True, exist_ok=False)
 
+        raw_command: Sequence[str] | str = (
+            ["main.py", *self.config.to_engine_args()]
+            if command is None
+            else command
+        )
+        sensitive_values = _extract_sensitive_values(raw_command)
         command_list = self._command(command)
         command_path = run_dir / "command.txt"
         command_path.write_text(_format_command(command, command_list) + "\n", encoding="utf-8")
@@ -132,6 +144,7 @@ class RunManager:
             command=command_list,
             started_at=_now_iso(),
             _manager=self,
+            _sensitive_values=sensitive_values,
         )
         self.context = ctx
         self._sync_from_context(ctx)
@@ -199,12 +212,70 @@ def _manifest_data(ctx: RunContext) -> dict[str, object]:
             {"kind": artifact.kind, "path": artifact.path, "exists": artifact.exists}
             for artifact in ctx.artifacts
         ],
-        "warnings": list(ctx.warnings),
-        "errors": list(ctx.errors),
+        "warnings": [
+            _redact_runtime_text(value, ctx._sensitive_values)
+            for value in ctx.warnings
+        ],
+        "errors": [
+            _redact_runtime_text(value, ctx._sensitive_values)
+            for value in ctx.errors
+        ],
         "success": ctx.success,
-        "error_summary": ctx.error_summary,
+        "error_summary": (
+            _redact_runtime_text(ctx.error_summary, ctx._sensitive_values)
+            if ctx.error_summary is not None
+            else None
+        ),
         "git_commit": _git_commit(),
     }
+
+
+def _extract_sensitive_values(command: Sequence[str] | str) -> tuple[str, ...]:
+    found: list[str] = []
+    if isinstance(command, str):
+        for flag in SENSITIVE_COMMAND_FLAGS:
+            pattern = re.compile(
+                rf"{re.escape(flag)}(?:=|\s+)(\"[^\"]*\"|'[^']*'|[^\s]+)",
+                flags=re.IGNORECASE,
+            )
+            for match in pattern.finditer(command):
+                value = match.group(1).strip().strip("\"'")
+                if value:
+                    found.append(value)
+    else:
+        values = [str(part) for part in command]
+        idx = 0
+        while idx < len(values):
+            part = values[idx]
+            lowered = part.lower()
+            matched_flag = next(
+                (flag for flag in SENSITIVE_COMMAND_FLAGS if lowered == flag or lowered.startswith(f"{flag}=")),
+                None,
+            )
+            if matched_flag is None:
+                idx += 1
+                continue
+            if "=" in part:
+                value = part.split("=", 1)[1]
+                if value:
+                    found.append(value)
+                idx += 1
+                continue
+            if idx + 1 < len(values):
+                value = values[idx + 1]
+                if value:
+                    found.append(value)
+                idx += 2
+            else:
+                idx += 1
+    return tuple(dict.fromkeys(found))
+
+
+def _redact_runtime_text(text: str, sensitive_values: Sequence[str]) -> str:
+    redacted = str(text)
+    for value in sorted((str(item) for item in sensitive_values if item), key=len, reverse=True):
+        redacted = redacted.replace(value, REDACTED_VALUE)
+    return _redact_command_text(redacted)
 
 
 def _redact_command_parts(parts: Sequence[str]) -> list[str]:
