@@ -266,21 +266,31 @@ def _postprocess_beat_grid_for_run(version: str, argv: list[str], beat_grid, *, 
     }
 
 
-def autosize_controller_sidecars(version: str, argv: list[str], *, since: float) -> dict[str, Any] | None:
-    """Copy or synthesize xlights_networks.xml beside freshly rendered XSQ files."""
+def autosize_controller_sidecars(
+    version: str,
+    argv: list[str],
+    *,
+    since: float,
+    before: dict[Path, tuple[int, int]] | None = None,
+) -> dict[str, Any] | None:
+    """Copy or synthesize xlights_networks.xml beside XSQs changed by this run."""
 
     try:
         config = RunConfig.from_engine_args("engine", argv)
     except Exception as exc:
-        return {"enabled": False, "error": f"failed to parse engine args: {exc}"}
+        raise RuntimeError(f"Unable to configure controller autosizing: {exc}") from exc
     if not config.autosize_controllers:
         return None
     if config.layout_path is None:
-        return {"enabled": False, "error": "--autosize-controllers requires --layout-file"}
+        raise RuntimeError("--autosize-controllers requires --layout-file")
 
     plan = build_controller_plan(config.layout_path, padding=config.controller_padding)
     roots = _artifact_search_roots(config, version)
-    xsq_outputs = _recent_xsq_outputs(roots, since=since)
+    xsq_outputs = (
+        _changed_xsq_outputs(roots, before)
+        if before is not None
+        else _recent_xsq_outputs(roots, since=since)
+    )
     output_targets = xsq_outputs or [config.output_root]
     sidecars = write_networks_for_xsq_outputs(plan, output_targets)
     return {
@@ -309,16 +319,18 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
 
     _run_effect_engine_with_failure_capture(version, cleaned_args)
     _verify_requested_xsq_outputs(version, cleaned_args, before=before_xsq)
-    controller_summary = autosize_controller_sidecars(version, cleaned_args, since=started)
+    controller_summary = autosize_controller_sidecars(
+        version,
+        cleaned_args,
+        since=started,
+        before=before_xsq,
+    )
     if controller_summary is not None:
-        if controller_summary.get("enabled"):
-            effect_engine.log(
-                "Controller autosize: "
-                f"source={controller_summary['source']} channels={controller_summary['channel_count']} "
-                f"sidecars={len(controller_summary['sidecars'])}"
-            )
-        else:
-            effect_engine.log(f"Controller autosize skipped: {controller_summary.get('error')}")
+        effect_engine.log(
+            "Controller autosize: "
+            f"source={controller_summary['source']} channels={controller_summary['channel_count']} "
+            f"sidecars={len(controller_summary['sidecars'])}"
+        )
     if options.snap_timing and options.beat_grid is not None:
         summary = _postprocess_beat_grid_for_run(version, cleaned_args, options.beat_grid, since=started)
         effect_engine.log(
