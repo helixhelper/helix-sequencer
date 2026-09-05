@@ -46,3 +46,19 @@ def test_legacy_run_manager_redacts_inline_secret_from_custom_command(tmp_path: 
     assert secret not in manager.command_path.read_text(encoding="utf-8")
     assert secret not in manager.manifest_path.read_text(encoding="utf-8")
     assert f"--moises-api-key={REDACTED_VALUE}" in manager.command
+
+
+def test_inline_power_metadata_does_not_skip_following_option(tmp_path: Path) -> None:
+    metadata = tmp_path / "power.json"
+    config = RunConfig.from_engine_args(
+        "master",
+        [
+            f"--power-metadata-file={metadata}",
+            "--autosize-controllers",
+            "--controller-padding=75",
+        ],
+    )
+
+    assert config.power_metadata_path == metadata
+    assert config.autosize_controllers is True
+    assert config.controller_padding == 75
