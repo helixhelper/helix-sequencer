@@ -130,8 +130,15 @@ def _promote_orchestrated_template(
     cleaned = _clean_engine_args(engine_args)
     if not _orchestrator_template_promotion_enabled(engine_args):
         return cleaned
-    if report is None or not report.invoked or not report.xsq_written or not report.orchestrated_xsq_path:
-        return cleaned
+    if report is None:
+        raise RuntimeError("Orchestrated template promotion was requested, but no orchestration report was produced.")
+    if not report.invoked:
+        detail = f": {report.error}" if report.error else ""
+        raise RuntimeError(f"Orchestrated template promotion was requested, but orchestration failed{detail}")
+    if not report.xsq_written or not report.orchestrated_xsq_path:
+        raise RuntimeError(
+            "Orchestrated template promotion was requested, but orchestration did not produce an XSQ template."
+        )
     promoted_template = Path(report.orchestrated_xsq_path).as_posix()
     return _set_or_replace_arg(list(cleaned or []), "--template", promoted_template)
 
