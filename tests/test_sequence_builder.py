@@ -68,6 +68,35 @@ class SequenceBuilderTests(unittest.TestCase):
 
         self.assertEqual(args, ["--template", "new-template.xsq", "--quiet"])
 
+    def test_explicit_orchestrated_template_promotion_fails_when_orchestration_fails(self) -> None:
+        report = SimpleNamespace(
+            invoked=False,
+            xsq_written=False,
+            orchestrated_xsq_path=None,
+            error="planner failed",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "orchestration failed: planner failed"):
+            sequence_builder._promote_orchestrated_template(
+                ["--promote-orchestrated-template", "--template", "original.xsq"],
+                report,
+            )
+
+    def test_explicit_orchestrated_template_promotion_replaces_inline_template(self) -> None:
+        report = SimpleNamespace(
+            invoked=True,
+            xsq_written=True,
+            orchestrated_xsq_path="outputs/song.orchestrated.xsq",
+            error=None,
+        )
+
+        args = sequence_builder._promote_orchestrated_template(
+            ["--promote-orchestrated-template", "--template=original.xsq", "--quiet"],
+            report,
+        )
+
+        self.assertEqual(args, ["--template", "outputs/song.orchestrated.xsq", "--quiet"])
+
     def test_record_changed_artifacts_adds_known_outputs_to_manifest_file(self) -> None:
         import tempfile
 
