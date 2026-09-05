@@ -74,7 +74,11 @@ def _clean_engine_args(engine_args: list[str] | None) -> list[str] | None:
 
 
 def _has_explicit_beat_grid_args(engine_args: list[str] | None) -> bool:
-    return any(arg in BEAT_GRID_FLAGS for arg in (engine_args or []))
+    return any(
+        arg == flag or arg.startswith(f"{flag}=")
+        for arg in (engine_args or [])
+        for flag in BEAT_GRID_FLAGS
+    )
 
 
 def _apply_prime_beat_grid_defaults(profile_id_or_version: str | None, engine_args: list[str] | None) -> list[str] | None:
@@ -99,6 +103,11 @@ def _set_or_replace_arg(args: list[str], flag: str, value: str) -> list[str]:
             out.extend([flag, value])
             replaced = True
             idx += 2
+            continue
+        if item.startswith(f"{flag}="):
+            out.extend([flag, value])
+            replaced = True
+            idx += 1
             continue
         out.append(item)
         idx += 1
