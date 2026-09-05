@@ -54,6 +54,20 @@ class SequenceBuilderTests(unittest.TestCase):
 
         self.assertEqual(args, ["--no-snap", "--quiet"])
 
+    def test_explicit_inline_snap_grid_is_not_augmented_by_prime_defaults(self) -> None:
+        args = sequence_builder._apply_prime_beat_grid_defaults("v27.3", ["--snap-grid=8", "--quiet"])
+
+        self.assertEqual(args, ["--snap-grid=8", "--quiet"])
+
+    def test_set_or_replace_arg_replaces_inline_form_without_duplication(self) -> None:
+        args = sequence_builder._set_or_replace_arg(
+            ["--template=old-template.xsq", "--quiet"],
+            "--template",
+            "new-template.xsq",
+        )
+
+        self.assertEqual(args, ["--template", "new-template.xsq", "--quiet"])
+
     def test_record_changed_artifacts_adds_known_outputs_to_manifest_file(self) -> None:
         import tempfile
 
