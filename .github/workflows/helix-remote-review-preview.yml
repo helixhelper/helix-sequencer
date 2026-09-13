@@ -1,32 +1,58 @@
 name: Helix Remote Review Preview MP4
 
 on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.py'
+      - '**/*.json'
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/*.xml'
+      - '**/*.xsq'
+      - '**/*.xmodel'
+      - '**/*.lms'
+      - 'assets/**'
+      - '.github/trigger-mp4-preview.txt'
+      - 'requirements*.txt'
   push:
     branches:
-      - feature/restructure-core
-      - 'codex/**'
-      - 'feature/**'
-      - 'beta/**'
+      - '**'
+    paths:
+      - '**/*.py'
+      - '**/*.json'
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/*.xml'
+      - '**/*.xsq'
+      - '**/*.xmodel'
+      - '**/*.lms'
+      - 'assets/**'
+      - '.github/trigger-mp4-preview.txt'
+      - 'requirements*.txt'
   workflow_dispatch:
     inputs:
       duration_seconds:
-        description: "Preview duration in seconds"
+        description: "Deterministic benchmark duration in seconds"
         required: false
-        default: "20"
-      variants:
-        description: "Space-separated variants to score before rendering winner"
+        default: "30"
+      fps:
+        description: "Preview frames per second"
         required: false
-        default: "v28.7 v28.8 v28.9"
-      quality_preset:
-        description: "preview_hq quality preset when available"
-        required: false
-        default: "xlights"
+        default: "10"
 
 permissions:
   contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 env:
   PYTHONPATH: .
+  PREVIEW_AUDIO_DIR: test_runs/outcome_preview_input
+  PREVIEW_DIR: test_runs/outcome_preview
 
 jobs:
   render-winner-preview:
@@ -43,177 +69,123 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install preview dependencies
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install numpy scipy librosa soundfile numba llvmlite imageio imageio-ffmpeg pillow scikit-learn pytest
+          python -m pip install numpy scipy librosa soundfile numba llvmlite imageio imageio-ffmpeg pillow scikit-learn
 
       - name: Compile preview stack
-        run: |
-          python -m compileall -q core ai xlights tools tests main.py gui_launcher.py
+        run: python -m compileall -q core ai xlights tools main.py gui_launcher.py
 
-      - name: Stage deterministic audio and layout
-        run: |
-          set -euo pipefail
-          mkdir -p fixtures/legacy_256/converted
-          cp template.xsq fixtures/legacy_256/converted/template.xsq
-          cp xlights_rgbeffects.xml fixtures/legacy_256/converted/xlights_rgbeffects.xml
-          duration="${{ inputs.duration_seconds || '20' }}"
-          python tools/generate_structured_benchmark_audio.py LightsOutTheme.wav --duration "$duration"
-          python - <<'PY'
-          import imageio_ffmpeg
-          import subprocess
-          ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-          subprocess.run([
-              ffmpeg,
-              '-y',
-              '-i', 'LightsOutTheme.wav',
-              '-c:a', 'libmp3lame',
-              '-b:a', '192k',
-              'LightsOutTheme.mp3',
-          ], check=True)
-          PY
-
-      - name: Generate and score candidate XSQ files
-        id: variants
-        continue-on-error: true
+      - name: Generate source-clean benchmark audio
+        env:
+          PREVIEW_DURATION: ${{ inputs.duration_seconds || '30' }}
         run: |
           set -euo pipefail
-          duration="${{ inputs.duration_seconds || '20' }}"
-          variants="${{ inputs.variants || 'v28.7 v28.8 v28.9' }}"
-          python tools/run_v28_legacy_256_previews.py \
-            --audio LightsOutTheme.mp3 \
-            --template fixtures/legacy_256/converted/template.xsq \
-            --layout fixtures/legacy_256/converted/xlights_rgbeffects.xml \
-            --output-root test_runs/remote_review_preview \
-            --duration-seconds "$duration" \
-            --versions $variants \
-            --fps 15 --width 1280 --height 720 --skip-render
+          mkdir -p "$PREVIEW_AUDIO_DIR" "$PREVIEW_DIR"
+          python tools/generate_structured_benchmark_audio.py \
+            "$PREVIEW_AUDIO_DIR/helix-outcome-preview.wav" \
+            --duration "$PREVIEW_DURATION"
 
-      - name: Export validated demo XSQ fallback
-        if: always()
+      - name: Build and render the active Helix outcome
+        env:
+          PREVIEW_FPS: ${{ inputs.fps || '10' }}
         run: |
           set -euo pipefail
-          mkdir -p test_runs/remote_review_preview/fallback
-          python tools/export_demo_xsq.py --output test_runs/remote_review_preview/fallback/helix_demo_vocal.xsq
-          python tools/validate_xsq_structure.py test_runs/remote_review_preview/fallback/helix_demo_vocal.xsq
+          python -m tools.helixia_smoke_preview \
+            --profile master \
+            --audio "$PREVIEW_AUDIO_DIR/helix-outcome-preview.wav" \
+            --layout xlights_rgbeffects.xml \
+            --template template.xsq \
+            --output-dir "$PREVIEW_DIR" \
+            --fps "$PREVIEW_FPS" \
+            --width 960 \
+            --height 540 \
+            --contact-sheet-samples 8 \
+            --contact-sheet-mode both
 
-      - name: Pick highest-scoring valid candidate or fallback and render MP4
-        if: always()
+      - name: Validate preview and build manifest
+        env:
+          PREVIEW_DURATION: ${{ inputs.duration_seconds || '30' }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          import shutil
-          import subprocess
-          import sys
-          from pathlib import Path
-
-          out = Path('test_runs/remote_review_preview')
-          out.mkdir(parents=True, exist_ok=True)
-          summary_path = out / 'v28_legacy_256_preview_summary.json'
-          candidates = []
-
-          if summary_path.exists():
-              summary = json.loads(summary_path.read_text())
-              for item in summary.get('results', []):
-                  report = item.get('report', {}) or {}
-                  if item.get('sequence_ok') and item.get('sequence'):
-                      score = float(report.get('quality_score') or 0.0)
-                      validation_issues = int(report.get('validation_issues') or 0)
-                      candidates.append((score, -validation_issues, item))
-
-          media_dir = out / '_media'
-          audio_candidates = sorted(media_dir.glob('LightsOutTheme.first_*s.mp3')) + sorted(media_dir.glob('*.mp3'))
-          audio = audio_candidates[0] if audio_candidates else Path('LightsOutTheme.mp3')
-
-          if candidates:
-              score, neg_issues, winner = sorted(candidates, reverse=True)[0]
-              xsq = Path(winner['sequence'])
-              source = 'ranked_variant'
-              version = str(winner.get('version'))
-              validation_issues = -neg_issues
-              cmd = [
-                  sys.executable,
-                  'tools/preview_hq.py',
-                  str(xsq),
-                  '--layout', 'fixtures/legacy_256/converted/xlights_rgbeffects.xml',
-                  '--audio', str(audio),
-                  '--quality-preset', '${{ inputs.quality_preset || 'xlights' }}',
-              ]
-          else:
-              xsq = out / 'fallback' / 'helix_demo_vocal.xsq'
-              score = 0.0
-              version = 'demo_fallback'
-              source = 'validated_demo_xsq_fallback'
-              validation_issues = 0
-              if not xsq.exists():
-                  raise SystemExit(f'Fallback XSQ missing: {xsq}')
-              cmd = [
-                  sys.executable,
-                  'tools/render_xsq_skeleton_preview.py',
-                  str(xsq),
-                  '--width', '1280',
-                  '--height', '720',
-                  '--fps', '24',
-              ]
-
-          print('Rendering remote review MP4 with command:')
-          print(' '.join(cmd), flush=True)
-          subprocess.run(cmd, check=True)
-
-          rendered_mp4 = xsq.with_suffix('.mp4')
-          if not rendered_mp4.exists():
-              raise SystemExit(f'Render command completed but did not create {rendered_mp4}')
-
-          final_mp4 = out / f"REMOTE_REVIEW_{version}_{rendered_mp4.name}"
-          shutil.copy2(rendered_mp4, final_mp4)
-
-          result = {
-              'source': source,
-              'winner_version': version,
-              'quality_score': score,
-              'validation_issues': validation_issues,
-              'winner_xsq': str(xsq),
-              'winner_mp4': str(final_mp4),
-              'audio': str(audio),
-              'variant_generation_outcome': '${{ steps.variants.outcome }}',
-              'render_command': ' '.join(cmd),
-          }
-          (out / 'remote_review_winner.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
-          print(json.dumps(result, indent=2, sort_keys=True), flush=True)
-          PY
-
-      - name: Build reviewer summary
-        if: always()
-        run: |
-          set -euo pipefail
-          echo '# Helix Remote Review Preview' > review_summary.md
-          echo '' >> review_summary.md
-          echo 'Download the `helix-remote-review-preview-mp4` artifact from this workflow run.' >> review_summary.md
-          echo '' >> review_summary.md
-          if [[ -f test_runs/remote_review_preview/remote_review_winner.json ]]; then
-            echo '## Winner or fallback render' >> review_summary.md
-            echo '```json' >> review_summary.md
-            cat test_runs/remote_review_preview/remote_review_winner.json >> review_summary.md
-            echo '```' >> review_summary.md
-          fi
-          echo '' >> review_summary.md
-          echo '## Files' >> review_summary.md
-          find test_runs/remote_review_preview -maxdepth 4 -type f | sort >> review_summary.md || true
-          cat review_summary.md >> "$GITHUB_STEP_SUMMARY"
+          python -m tools.build_outcome_preview_manifest \
+            --output-dir "$PREVIEW_DIR" \
+            --benchmark-duration "$PREVIEW_DURATION" \
+            --summary-out review_summary.md
 
       - name: Upload MP4 preview and sequence artifacts
-        if: always()
+        id: upload-preview
         uses: actions/upload-artifact@v4
         with:
           name: helix-remote-review-preview-mp4
           path: |
             review_summary.md
-            test_runs/remote_review_preview/**/*.mp4
-            test_runs/remote_review_preview/**/*.xsq
-            test_runs/remote_review_preview/**/*.json
-            test_runs/remote_review_preview/**/*.txt
-          if-no-files-found: warn
+            test_runs/outcome_preview/**/*.mp4
+            test_runs/outcome_preview/**/*.xsq
+            test_runs/outcome_preview/**/*.json
+            test_runs/outcome_preview/**/*.txt
+            test_runs/outcome_preview/**/*.jpg
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Add artifact link to run summary
+        env:
+          ARTIFACT_URL: ${{ steps.upload-preview.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Download"
+            echo
+            echo "[Download the preview MP4 bundle]($ARTIFACT_URL)"
+            echo
+            cat review_summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach preview link to pull request
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          ARTIFACT_URL: ${{ steps.upload-preview.outputs.artifact-url }}
+          PREVIEW_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const marker = '<!-- helix-outcome-preview -->';
+            const body = [
+              marker,
+              '### Helix outcome preview',
+              '',
+              `[Download the MP4 preview bundle](${process.env.ARTIFACT_URL})`,
+              '',
+              `Rendered the active \`master\` profile from \`${process.env.PREVIEW_SHA.slice(0, 12)}\` using the deterministic benchmark.`,
+              'The Actions artifact is retained for 14 days.',
+            ].join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const previous = comments.find(comment =>
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

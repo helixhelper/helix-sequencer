@@ -23,24 +23,44 @@ def test_remote_review_workflow_uploads_mp4_artifacts() -> None:
     text = _workflow_text()
 
     assert 'uses: actions/upload-artifact@v4' in text
+    assert 'id: upload-preview' in text
     assert 'name: helix-remote-review-preview-mp4' in text
     assert 'review_summary.md' in text
     assert '**/*.mp4' in text
     assert '**/*.xsq' in text
     assert '**/*.json' in text
+    assert 'if-no-files-found: error' in text
 
 
-def test_remote_review_workflow_contains_fallback_renderer_path() -> None:
+def test_remote_review_workflow_watches_outcome_affecting_paths() -> None:
     text = _workflow_text()
 
-    assert 'render_xsq_skeleton_preview.py' in text
-    assert 'validated_demo_xsq_fallback' in text
-    assert 'preview_hq.py' in text
+    assert 'pull_request:' in text
+    assert 'push:' in text
+    assert "'**/*.py'" in text
+    assert "'**/*.json'" in text
+    assert "'**/*.xml'" in text
+    assert "'**/*.xsq'" in text
+    assert "'**/*.lms'" in text
+    assert 'cancel-in-progress: true' in text
 
 
-def test_remote_review_workflow_generates_validated_demo_fallback() -> None:
+def test_remote_review_workflow_renders_active_profile_from_deterministic_audio() -> None:
     text = _workflow_text()
 
-    assert 'export_demo_xsq.py' in text
-    assert 'validate_xsq_structure.py' in text
-    assert 'helix_demo_vocal.xsq' in text
+    assert 'generate_structured_benchmark_audio.py' in text
+    assert 'python -m tools.helixia_smoke_preview' in text
+    assert '--profile master' in text
+    assert 'PREVIEW_AUDIO_DIR: test_runs/outcome_preview_input' in text
+    assert '--audio "$PREVIEW_AUDIO_DIR/helix-outcome-preview.wav"' in text
+    assert '--output-dir "$PREVIEW_DIR"' in text
+    assert 'python -m tools.build_outcome_preview_manifest' in text
+
+
+def test_remote_review_workflow_attaches_preview_link_to_pull_request() -> None:
+    text = _workflow_text()
+
+    assert 'pull-requests: write' in text
+    assert 'steps.upload-preview.outputs.artifact-url' in text
+    assert 'actions/github-script@v7' in text
+    assert '<!-- helix-outcome-preview -->' in text
