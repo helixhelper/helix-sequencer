@@ -27,6 +27,7 @@ from core import hardkor_engine
 from core import matrix_intelligence as matrix_planner
 from core import birdsong_engine
 from core import lyric_interpreter
+from core import lms_calibration
 from core import model_parser as xmp
 from core import polish as sequence_polish
 from core import rhythm_intelligence as ri
@@ -195,6 +196,8 @@ class RuntimeTuning:
     workspace_history_limit: int = 24
     learning_memory_enabled: bool = True
     learning_memory_file: Path | None = None
+    reference_calibration: lms_calibration.ReferenceCalibrationProfile | None = None
+    reference_calibration_strength: float = 1.0
     auto_timing_tracks: bool = True
     pixel_reactive: bool = True
     audio_reactive_profile: str = "balanced"
@@ -8742,6 +8745,9 @@ def write_sequence_notes(path: Path, payload: dict) -> None:
     matrix_video = matrix_intel.get("video_data", {}) or {}
     exports = payload.get("exports", {}) or {}
     responsible_use = payload.get("responsible_use", {}) or {}
+    reference_calibration = payload.get("reference_calibration", {}) or {}
+    calibration_reference = reference_calibration.get("reference", {}) or {}
+    calibration_achieved = reference_calibration.get("achieved", {}) or {}
     lines = [
         "Dream Sequence Weaver",
         "=" * 28,
@@ -8780,6 +8786,17 @@ def write_sequence_notes(path: Path, payload: dict) -> None:
         f"- Polish enabled: {int(bool(tuning.get('polish_enabled', True)))}",
         f"- Variant count: {tuning.get('variant_count', 1)}",
         f"- Learn from XSQs: {int(bool(tuning.get('learn_from_my_xsqs', False)))}",
+        "",
+        "Reference Calibration",
+        f"- Enabled: {int(bool(reference_calibration.get('enabled', False)))}",
+        f"- Privacy mode: {reference_calibration.get('privacy_mode', 'aggregate_only')}",
+        f"- Strength: {reference_calibration.get('strength', 0.0)}",
+        f"- Match score: {reference_calibration.get('score', '')}",
+        f"- Source hash: {str(reference_calibration.get('source_sha256', ''))[:16]}",
+        f"- Grid target/achieved: {calibration_reference.get('timing_grid_alignment', '')} / {calibration_achieved.get('timing_grid_alignment', '')}",
+        f"- Median duration target/achieved: {calibration_reference.get('median_effect_ms', '')} / {calibration_achieved.get('median_effect_ms', '')} ms",
+        f"- Shimmer target/achieved: {calibration_reference.get('shimmer_share', '')} / {calibration_achieved.get('shimmer_share', '')}",
+        f"- Fade target/achieved: {calibration_reference.get('fade_share', '')} / {calibration_achieved.get('fade_share', '')}",
         "",
         "Matrix Intelligence",
         f"- Enabled: {int(bool(matrix_intel.get('enabled', tuning.get('matrix_intelligence', False))))}",
@@ -10366,6 +10383,25 @@ def run_variant(
     cooldowns = base.Cooldowns()
     stats = base.PlacementStats()
     total = 0
+    calibration_application = (
+        lms_calibration.CalibrationApplication(
+            profile=tuning.reference_calibration,
+            strength=tuning.reference_calibration_strength,
+        )
+        if tuning.reference_calibration is not None
+        else None
+    )
+    if calibration_application is not None:
+        calibration_profile = calibration_application.profile
+        log(
+            "LMS aggregate calibration active: "
+            f"strength={calibration_application.strength:.2f}, "
+            f"grid={calibration_profile.timing_grid_ms}ms/"
+            f"{calibration_profile.timing_grid_alignment:.1%}, "
+            f"median={calibration_profile.median_effect_ms}ms, "
+            f"shimmer={calibration_profile.shimmer_share:.1%}, "
+            f"fade={calibration_profile.fade_share:.1%}"
+        )
     ramp_ok = (xsq.ramp_tpl.settings is not None or xsq.ramp_tpl.palette is not None)
     validation_rejections: list[dict] = []
     used_targets: set[str] = set()
@@ -10933,6 +10969,37 @@ def run_variant(
                 duration_cap_ms = 420
             if duration_cap_ms > 0 and (en_i - st_i) > duration_cap_ms:
                 en_i = st_i + duration_cap_ms
+        if calibration_application is not None:
+            calibration_key = "|".join(
+                (
+                    nm,
+                    str(label or ""),
+                    layer_key,
+                    stem_key,
+                    str(st_i),
+                    str(en_i),
+                    str(total),
+                )
+            )
+            calibrated_effect = calibration_application.tune_effect(
+                runtime_effect,
+                stable_key=calibration_key,
+            )
+            if calibrated_effect != runtime_effect:
+                runtime_effect = calibrated_effect
+                fallback_tpl = xsq.ramp_tpl if runtime_effect.strip().lower() == "ramp" else xsq.on_tpl
+                template_to_use = resolve_effect_template(
+                    effect_name=runtime_effect,
+                    explicit_tpl=None,
+                    template_library=template_library,
+                    fallback_tpl=fallback_tpl,
+                )
+            st_i, en_i = calibration_application.tune_range(
+                st_i,
+                en_i,
+                stable_key=calibration_key,
+                min_duration_ms=min_dur,
+            )
         palette_choice = pick_palette_for_effect(
             mode=tuning.palette_mode,
             template_palette=template_to_use.palette,
@@ -12329,6 +12396,14 @@ def run_variant(
 
     power_payload = load_power_metadata_payload(tuning.power_metadata_file)
     power_payload["enforce"] = bool(tuning.fail_on_power_risk)
+    reference_calibration_payload = (
+        lms_calibration.summarize_calibration_result(
+            calibration_application,
+            lms_calibration.iter_timeline_placements(timelines),
+        )
+        if calibration_application is not None
+        else lms_calibration.disabled_calibration_summary()
+    )
 
     payload = {
         "version": style.version,
@@ -12381,6 +12456,12 @@ def run_variant(
             "workspace_history_folder": str(tuning.workspace_history_folder) if tuning.workspace_history_folder else "",
             "learning_memory_enabled": bool(tuning.learning_memory_enabled),
             "learning_memory_file": str(tuning.learning_memory_file) if tuning.learning_memory_file else "",
+            "reference_calibration_enabled": calibration_application is not None,
+            "reference_calibration_strength": (
+                round(float(calibration_application.strength), 3)
+                if calibration_application is not None
+                else 0.0
+            ),
             "matrix_intelligence": bool(tuning.matrix_intelligence),
             "video_file": str(tuning.video_file) if tuning.video_file else "",
             "blend_rules_file": str(tuning.blend_rules_file) if tuning.blend_rules_file else "",
@@ -12480,6 +12561,7 @@ def run_variant(
             "source_files": workspace_history.source_files[:24],
             "learned_from_user_xsqs": bool(workspace_history.learned_from_user_xsqs),
         },
+        "reference_calibration": reference_calibration_payload,
         "parsed_layout": {
             "model_count": len(parsed_layout.models) if parsed_layout is not None else 0,
             "root_model_count": len(parsed_layout.root_models()) if parsed_layout is not None else 0,
@@ -12735,6 +12817,23 @@ def parse_args(style: VariantStyle, argv: list[str] | None = None) -> argparse.N
     parser.add_argument("--learning-memory-file", dest="learning_memory_file", help="JSON file for Helix-generated-only scoring memory")
     parser.add_argument("--learning-memory", dest="learning_memory_enabled", action="store_true", help="Enable Helix-generated-only scoring memory")
     parser.add_argument("--no-learning-memory", dest="learning_memory_enabled", action="store_false", help="Disable scoring memory writes")
+    parser.add_argument(
+        "--lms-calibration-file",
+        dest="lms_calibration_file",
+        help="Licensed Light-O-Rama LMS reference used for aggregate-only calibration",
+    )
+    parser.add_argument(
+        "--lms-calibration-strength",
+        type=float,
+        dest="lms_calibration_strength",
+        help="Blend strength for LMS aggregate targets (0.0-1.0; default 1.0)",
+    )
+    parser.add_argument(
+        "--acknowledge-reference-rights",
+        dest="acknowledge_reference_rights",
+        action="store_true",
+        help="Confirm you own or are licensed to use the LMS reference for calibration",
+    )
     parser.add_argument("--auto-timing-tracks", dest="auto_timing_tracks", action="store_true", help="Write extended Queen Mary style timing tracks")
     parser.add_argument("--no-auto-timing-tracks", dest="auto_timing_tracks", action="store_false", help="Disable extended timing-track output")
     parser.add_argument("--pixel-reactive", dest="pixel_reactive", action="store_true", help="Enable family-aware reactive pixel choreography for compatible models")
@@ -12879,6 +12978,20 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     if blend_rules_file is not None and not blend_rules_file.exists():
         log(f"Blend rules file not found; using default matrix blend rules: {blend_rules_file}")
         blend_rules_file = None
+    reference_calibration: lms_calibration.ReferenceCalibrationProfile | None = None
+    if args.lms_calibration_file:
+        if not args.acknowledge_reference_rights:
+            base.die(
+                "LMS calibration requires --acknowledge-reference-rights to confirm that "
+                "you own or are licensed to use the reference."
+            )
+        calibration_path = resolve_path(folder, args.lms_calibration_file)
+        if calibration_path is None or not calibration_path.exists():
+            base.die(f"LMS calibration file not found: {args.lms_calibration_file}")
+        try:
+            reference_calibration = lms_calibration.load_lms_calibration(calibration_path)
+        except ValueError as exc:
+            base.die(str(exc))
     moises_key = (args.moises_api_key or "").strip() or os.environ.get("MOISES_API_KEY", "")
     audio_reactive_profile, audio_reactive_intensity = resolve_audio_reactive_tuning(
         args.audio_reactive_profile,
@@ -12918,6 +13031,12 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
         workspace_history_limit=max(4, int(args.workspace_history_limit if args.workspace_history_limit is not None else 24)),
         learning_memory_enabled=bool(args.learning_memory_enabled),
         learning_memory_file=(resolve_path(folder, args.learning_memory_file) if args.learning_memory_file else None),
+        reference_calibration=reference_calibration,
+        reference_calibration_strength=base.clamp(
+            float(args.lms_calibration_strength if args.lms_calibration_strength is not None else 1.0),
+            0.0,
+            1.0,
+        ),
         auto_timing_tracks=bool(args.auto_timing_tracks),
         pixel_reactive=bool(args.pixel_reactive),
         audio_reactive_profile=audio_reactive_profile,
@@ -13014,6 +13133,8 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
         f"strict_xlights={int(bool(tuning.strict_xlights_effects))}, "
         f"ac_only={int(bool(tuning.ac_lights_only))}, "
         f"max_layers={tuning.max_layers_per_prop}, min_ms={tuning.min_effect_ms}, "
+        f"lms_calibration={int(tuning.reference_calibration is not None)}/"
+        f"{tuning.reference_calibration_strength:.2f}, "
         f"lyrics_sync={int(bool(tuning.sync_lyrics_heads))}, "
         f"birdsong={int(bool(tuning.birdsong_enabled))}/{int(bool(tuning.birdsong_auto))}/"
         f"{tuning.birdsong_intensity:.2f}/{tuning.birdsong_min_confidence:.2f}/{tuning.birdsong_profile}, "

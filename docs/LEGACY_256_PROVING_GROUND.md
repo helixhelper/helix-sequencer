@@ -161,13 +161,18 @@ A dry run only needs the committed manifest to validate. A real run needs:
 - converted `template.xsq`
 - converted `xlights_rgbeffects.xml`
 
-The GP LMS is optional for generation but recommended for inspection.
+The GP LMS is optional. It remains inspection-only unless the operator explicitly
+confirms usage rights; with that confirmation, Helix applies aggregate timing,
+duration, effect-mix, and activity targets during generation.
 
 ## 9. Inspect The GP LMS Locally
 
 ```bash
 PYTHONPATH=. python -m tools.inspect_lms local_fixtures/legacy_256/source_lms/GP_sequence.lms --output test_runs/legacy_256_lms_inspection.json
 ```
+
+The runtime calibration profile contains only aggregate statistics and a source
+hash. It does not retain channel names, event timestamps, or choreography.
 
 ## 10. Dry-Run Individual Profiles
 
@@ -184,7 +189,10 @@ PYTHONPATH=. python -m tools.run_legacy_256_profile legacy_256_showcase \
   --template fixtures/legacy_256/converted/template.xsq \
   --audio local_fixtures/legacy_256/audio/song.mp3 \
   --layout-file fixtures/legacy_256/converted/xlights_rgbeffects.xml \
-  --output-dir test_runs/legacy_256_showcase
+  --output-dir test_runs/legacy_256_showcase \
+  --extra-engine-arg \
+  --lms-calibration-file local_fixtures/legacy_256/source_lms/GP_sequence.lms \
+  --acknowledge-reference-rights
 ```
 
 ## 12. Compare Reports
@@ -203,6 +211,7 @@ PYTHONPATH=. python -m tools.compare_legacy_256_reports \
 PYTHONPATH=. python -m tools.run_legacy_256_evaluation \
   --manifest fixtures/legacy_256/layout_256_manifest.json \
   --lms local_fixtures/legacy_256/source_lms/GP_sequence.lms \
+  --acknowledge-reference-rights \
   --template fixtures/legacy_256/converted/template.xsq \
   --audio local_fixtures/legacy_256/audio/song.mp3 \
   --layout-file fixtures/legacy_256/converted/xlights_rgbeffects.xml \
@@ -216,6 +225,7 @@ PYTHONPATH=. python -m tools.run_legacy_256_evaluation \
 PYTHONPATH=. python -m tools.run_legacy_256_evaluation \
   --manifest fixtures/legacy_256/layout_256_manifest.json \
   --lms local_fixtures/legacy_256/source_lms/GP_sequence.lms \
+  --acknowledge-reference-rights \
   --template fixtures/legacy_256/converted/template.xsq \
   --audio local_fixtures/legacy_256/audio/song.mp3 \
   --layout-file fixtures/legacy_256/converted/xlights_rgbeffects.xml \
@@ -259,5 +269,5 @@ PYTHONPATH=. python -m pytest \
 2. Run the full evaluation dry-run locally.
 3. Fix any missing path or conversion issues.
 4. Run the real evaluation.
-5. Inspect `legacy_256_evaluation.json` and the winning `.report.json`.
-6. Calibrate the existing engine weights based on actual rejected-effect, clutter, overlap, and section-coverage numbers.
+5. Inspect `legacy_256_evaluation.json`, including `lms_calibration`, and the winning `.report.json`.
+6. Compare the report's `reference_calibration.reference` and `achieved` aggregates before adjusting other engine weights.
