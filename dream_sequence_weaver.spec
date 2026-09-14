@@ -14,6 +14,18 @@ datas = [
     (str(root / "c82.png"), "."),
     (str(root / "xlights" / "effect_catalog.json"), "xlights"),
 ]
+for source, destination in (
+    (root / "template.xsq", "."),
+    (root / "xlights_rgbeffects.xml", "."),
+    (root / "xlights_rgbeffects.xbkp", "."),
+    (root / "helixville4", "helixville4"),
+    (
+        root / "fixtures" / "band_geometry" / "models" / "HX_SNOWMAN_DRUMMER_V3.xmodel",
+        "fixtures/band_geometry/models",
+    ),
+):
+    if source.exists():
+        datas.append((str(source), destination))
 for mascot_name in ("helixmascot.jpg", "helixmascot.jpeg", "helixmascot.png"):
     mascot_path = root / mascot_name
     if mascot_path.exists():
@@ -23,10 +35,22 @@ datas += collect_data_files("imageio_ffmpeg")
 
 hiddenimports = [
     "core.audio_intelligence",
+    "core.drummer_xlights",
     "core.effect_engine",
+    "core.effect_engine_beat_grid",
     "core.engine_profiles",
     "core.model_parser",
     "core.sequence_builder",
+    "audio.drum_classification",
+    "audio.drum_detection",
+    "animation.drummer_motion",
+    "effects.drum_effects",
+    "mapping.drum_mapper",
+    "tools.build_helixville4_finished_drummer_layout",
+    "tools.build_helpers.drummer_v3_layout",
+    "tools.build_helpers.helixia",
+    "tools.build_helpers.helixville4_finished_band",
+    "tools.build_helpers.helixville4_full_band",
     "tools.utilities",
     "xlights.layout_sync",
     "xlights.timing_tracks",
@@ -39,7 +63,7 @@ hiddenimports = [
 ]
 
 a = Analysis(
-    ["main.py"],
+    ["gui_launcher.py"],
     pathex=[str(root)],
     binaries=[],
     datas=datas,
@@ -66,8 +90,8 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    # The active maintained entrypoint is currently CLI-based.
-    console=True,
+    # The beta executable is the GUI. Engine execution happens in-process.
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

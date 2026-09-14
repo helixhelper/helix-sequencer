@@ -1,0 +1,41 @@
+HELIX SEQUENCE WEAVER — WORKING BETA
+===================================
+
+QUICK START
+1. Extract the downloaded GitHub Actions artifact.
+2. Double-click HelixSequenceWeaverBeta.exe.
+   launch_sequencer_app.cmd is included as a fallback launcher.
+3. Let the app prepare "Helixville4 + Drummer V3".
+4. Choose an audio file.
+5. Leave the green defaults selected for the first run.
+6. Click Build Sequence.
+7. Read the Drummer assessment strip, then click Open Output Folder.
+
+WHAT THIS BETA PROVES
+- The packaged executable launches the GUI, not the old command-line entrypoint.
+- The engine runs in-process without unsafe Tk updates from a worker thread.
+- Typed drum detection and legacy fallback both reach one pose-aware drummer path.
+- Drummer V3 pose composites are actual xLights model geometry.
+- Accepted drum cues create real XSQ effects and an AUTO Drummer timing track.
+- The latest report records analyzed cues, requested placements, placed effects,
+  fallback mode, and timing-track count.
+
+HOW TO ASSESS THE DRUMMER
+- "typed_detection" means classified kick/snare/hat/tom/cymbal streams were used.
+- "legacy_marks" or a bus fallback means the run remained functional, but the
+  classification evidence was weaker.
+- placed effects should be greater than zero and reasonably close to requests.
+- In xLights, inspect HX_SNOWMAN_DRUMMER and the AUTO Drummer timing track.
+- Use a native xLights render for the final musical judgment. The Helix preview
+  renderer is a diagnostic and can exaggerate brightness or overlap.
+
+SAFE FIRST-RUN DEFAULTS
+- 3 variants, polish, shortlist, matrix intelligence, and Helix learning memory.
+- Vendor gate is off so an exploratory beta run is not rejected by paid-vendor
+  thresholds.
+- Birdsong and lyric/head sync are off. Turn them on only when testing those
+  optional systems.
+
+OUTPUTS
+The app writes to beta_workspace/outputs beside the executable unless changed.
+Keep the .xsq, .report.json, and .snowman_band.json from any run you want reviewed.
