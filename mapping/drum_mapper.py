@@ -17,6 +17,7 @@ DRUM_SUBMODEL_BY_TYPE = {
 
 DRUM_PRIORITY = {"kick": 0, "snare": 1, "cymbal": 2, "tom": 3, "hihat": 4, "drum_bus": 5}
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER_V3"
+DRUMMER_LAYOUT_MODEL = "HX_SNOWMAN_DRUMMER"
 DRUMMER_V3_POSE_BY_TYPE = {
     "kick": "kick_hit",
     "snare": "snare_hit",
@@ -188,9 +189,14 @@ def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str
                 "timestamp_ms": event.timestamp_ms,
                 "end_ms": event.timestamp_ms + duration,
                 "model": DRUMMER_V3_MODEL,
+                "layout_model": DRUMMER_LAYOUT_MODEL,
                 "drum_type": event.drum_type,
                 "pose": pose,
                 "submodels": list(DRUMMER_V3_SUBMODELS_BY_POSE[pose]),
+                "layout_submodels": [
+                    name.replace(f"{DRUMMER_V3_MODEL}_", f"{DRUMMER_LAYOUT_MODEL}_", 1)
+                    for name in DRUMMER_V3_SUBMODELS_BY_POSE[pose]
+                ],
                 "intensity": round(event.velocity, 3),
                 "confidence": event.confidence,
                 "source": event.source,

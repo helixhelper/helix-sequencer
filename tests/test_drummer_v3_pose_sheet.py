@@ -100,6 +100,19 @@ def test_drummer_v3_xmodel_has_named_zones_and_nontrivial_ranges() -> None:
     assert int(root.attrib["parm1"]) >= 90
     assert int(root.attrib["parm2"]) >= 70
     assert root.attrib["HelixImplementationState"] == "drummer_v3_asset_first_side_by_side"
+    assert root.attrib["DisplayAs"] == "Custom"
+    assert root.attrib["CustomWidth"] == root.attrib["parm1"]
+    assert root.attrib["CustomHeight"] == root.attrib["parm2"]
+    assert root.attrib["CustomModel"]
+    assert ":" not in root.attrib.get("CustomBkgImage", "")
+    node_count = int(root.attrib["HelixNodeCount"])
+    custom_nodes = {
+        int(value)
+        for row in root.attrib["CustomModel"].split(";")
+        for value in row.split(",")
+        if value != "."
+    }
+    assert custom_nodes == set(range(1, node_count + 1))
 
     submodels = {
         submodel.attrib["name"]: submodel.attrib.get("line0", "")
@@ -109,6 +122,7 @@ def test_drummer_v3_xmodel_has_named_zones_and_nontrivial_ranges() -> None:
     assert len(submodels) >= 35
     for name, line0 in submodels.items():
         assert RANGE_RE.match(line0), f"{name} has invalid ranges: {line0}"
+        assert max(_ranges(line0)) <= node_count
 
 
 def test_drummer_v3_hit_composites_include_contact_pose_nodes() -> None:
@@ -136,3 +150,5 @@ def test_detected_drum_events_map_to_drummer_v3_pose_names() -> None:
     poses = [event["pose"] for event in mapped]
     assert poses == ["kick_hit", "snare_hit", "hi_hat_pulse", "right_tom_hit", "both_crash"]
     assert mapped[1]["submodels"] == ["HX_SNOWMAN_DRUMMER_V3_HIT_SNARE"]
+    assert mapped[1]["layout_model"] == "HX_SNOWMAN_DRUMMER"
+    assert mapped[1]["layout_submodels"] == ["HX_SNOWMAN_DRUMMER_HIT_SNARE"]
