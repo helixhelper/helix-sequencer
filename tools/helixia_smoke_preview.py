@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from core import engine_profiles
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_AUDIO = ROOT / "LightsOutTheme.mp3"
@@ -37,8 +39,7 @@ def mp4_path(output_dir: Path, audio: Path, profile: str) -> Path:
 def build_sequence_command(args: argparse.Namespace) -> list[str]:
     return [
         sys.executable,
-        "-m",
-        "core.sequence_builder",
+        str(ROOT / "main.py"),
         "--profile",
         args.profile,
         "--",
@@ -56,6 +57,7 @@ def build_sequence_command(args: argparse.Namespace) -> list[str]:
         "--no-prompt",
         "--no-save-settings",
         "--no-workspace-history",
+        "--no-learning-memory",
         "--no-polish",
         "--no-matrix-intelligence",
         "--audio-reactive-profile",
@@ -297,7 +299,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Build and render the repeatable Helixia LightsOutTheme smoke preview."
     )
-    parser.add_argument("--profile", default="v27.3")
+    parser.add_argument(
+        "--profile",
+        default=engine_profiles.ACTIVE_PROFILE_ID,
+        help="Profile id or version; defaults to the active master profile.",
+    )
     parser.add_argument("--audio", type=Path, default=DEFAULT_AUDIO)
     parser.add_argument("--layout", type=Path, default=DEFAULT_LAYOUT)
     parser.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE)
@@ -332,9 +338,10 @@ def main(argv: list[str] | None = None) -> int:
     args.template = args.template.resolve()
     args.output_dir = args.output_dir.resolve()
 
-    xsq = sequence_path(args.output_dir, args.audio, args.profile)
-    report = report_path(args.output_dir, args.audio, args.profile)
-    mp4 = mp4_path(args.output_dir, args.audio, args.profile)
+    resolved_profile = engine_profiles.resolve_profile(args.profile)
+    xsq = sequence_path(args.output_dir, args.audio, resolved_profile.version)
+    report = report_path(args.output_dir, args.audio, resolved_profile.version)
+    mp4 = mp4_path(args.output_dir, args.audio, resolved_profile.version)
 
     if not args.skip_sequence:
         run_command(build_sequence_command(args), args.dry_run)
@@ -346,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.contact_sheet_mode in {"even", "both"}:
             sheet = write_contact_sheet(
                 mp4,
-                args.output_dir / f"{args.audio.stem},{args.profile}.contact-sheet.jpg",
+                args.output_dir / f"{args.audio.stem},{resolved_profile.version}.contact-sheet.jpg",
                 args.contact_sheet_samples,
             )
             if sheet:
@@ -356,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             busy_seconds = busy_sample_seconds(xsq, args.layout, args.fps, args.contact_sheet_samples)
             sheet = write_contact_sheet(
                 mp4,
-                args.output_dir / f"{args.audio.stem},{args.profile}.busy-contact-sheet.jpg",
+                args.output_dir / f"{args.audio.stem},{resolved_profile.version}.busy-contact-sheet.jpg",
                 args.contact_sheet_samples,
                 sample_seconds=busy_seconds,
             )
@@ -366,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         if busy_seconds:
             density_report = write_visual_density_report(
                 mp4,
-                args.output_dir / f"{args.audio.stem},{args.profile}.visual-density.json",
+                args.output_dir / f"{args.audio.stem},{resolved_profile.version}.visual-density.json",
                 busy_seconds,
             )
         summary = load_report_summary(report)

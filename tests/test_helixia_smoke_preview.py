@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from core import engine_profiles
 from tools import helixia_smoke_preview as smoke
 
 
@@ -20,12 +21,22 @@ class HelixiaSmokePreviewTests(unittest.TestCase):
 
         command = smoke.build_sequence_command(args)
 
-        self.assertIn("core.sequence_builder", command)
+        self.assertIn(str(smoke.ROOT / "main.py"), command)
+        self.assertNotIn("core.sequence_builder", command)
         self.assertIn("--audio-reactive-profile", command)
         self.assertIn("showcase", command)
         self.assertIn(str(smoke.DEFAULT_AUDIO), command)
         self.assertIn(str(smoke.DEFAULT_LAYOUT), command)
         self.assertIn("--max-layers-per-prop", command)
+        self.assertIn("--no-learning-memory", command)
+
+    def test_default_profile_tracks_active_master_profile(self) -> None:
+        args = smoke.build_parser().parse_args([])
+
+        profile = engine_profiles.resolve_profile(args.profile)
+
+        self.assertEqual(args.profile, engine_profiles.ACTIVE_PROFILE_ID)
+        self.assertEqual(profile.version, engine_profiles.ACTIVE_STYLE_VERSION)
 
     def test_load_report_summary_extracts_quality_and_layout_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

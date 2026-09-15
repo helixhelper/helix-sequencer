@@ -5,7 +5,7 @@ import unittest
 from animation.drummer_motion import assign_hand, build_drummer_motion
 from audio.drum_classification import DrumEvent, empty_drum_streams
 from effects.drum_effects import build_drum_effect_cues
-from mapping.drum_mapper import resolve_drum_streams, schedule_drum_events
+from mapping.drum_mapper import map_events_to_drummer_v3_poses, resolve_drum_streams, schedule_drum_events
 
 
 def _event(ms: int, drum_type: str, velocity: float = 0.8, confidence: float = 0.7) -> DrumEvent:
@@ -77,6 +77,24 @@ class DrumMappingTests(unittest.TestCase):
         self.assertEqual(motions[0]["hand"], "left")
         self.assertEqual(motions[1]["hand"], "both")
         self.assertLess(motions[0]["start_ms"], motions[0]["strike_ms"])
+
+    def test_tom_and_cymbal_sides_alternate_within_their_own_lanes(self) -> None:
+        poses = map_events_to_drummer_v3_poses(
+            [
+                _event(100, "tom", 0.35),
+                _event(200, "kick"),
+                _event(300, "tom", 0.95),
+                _event(400, "cymbal", 0.7),
+                _event(500, "snare"),
+                _event(600, "cymbal", 0.7),
+            ]
+        )
+        tom_poses = [item for item in poses if item["drum_type"] == "tom"]
+        cymbal_poses = [item for item in poses if item["drum_type"] == "cymbal"]
+
+        self.assertEqual([item["pose"] for item in tom_poses], ["left_tom_hit", "right_tom_hit"])
+        self.assertEqual([item["pose"] for item in cymbal_poses], ["right_crash", "left_crash"])
+        self.assertLess(tom_poses[0]["end_ms"] - tom_poses[0]["timestamp_ms"], tom_poses[1]["end_ms"] - tom_poses[1]["timestamp_ms"])
 
     def test_effect_cues_expose_spatial_and_piano_hooks(self) -> None:
         cues = build_drum_effect_cues([_event(100, "kick")])

@@ -5,6 +5,9 @@ from types import SimpleNamespace
 from core import sequence_builder
 
 
+PRIME_BEAT_GRID_DEFAULTS = ["--snap-grid", "16", "--snap-bpm", "120.0"]
+
+
 class _FakeEngine:
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str] | None]] = []
@@ -42,7 +45,15 @@ def test_run_profile_keeps_orchestrated_xsq_as_sidecar_by_default(monkeypatch) -
     assert fake_engine.calls == [
         (
             "v27.3",
-            ["--template", "template.xsq", "--audio", "song.mp3", "--output-dir", "out"],
+            [
+                *PRIME_BEAT_GRID_DEFAULTS,
+                "--template",
+                "template.xsq",
+                "--audio",
+                "song.mp3",
+                "--output-dir",
+                "out",
+            ],
         )
     ]
 
@@ -69,7 +80,15 @@ def test_run_profile_promotes_orchestrated_xsq_as_next_template_when_requested(m
     assert fake_engine.calls == [
         (
             "v27.3",
-            ["--template", "out/song.orchestrated.xsq", "--audio", "song.mp3", "--output-dir", "out"],
+            [
+                *PRIME_BEAT_GRID_DEFAULTS,
+                "--template",
+                "out/song.orchestrated.xsq",
+                "--audio",
+                "song.mp3",
+                "--output-dir",
+                "out",
+            ],
         )
     ]
 
@@ -92,7 +111,10 @@ def test_run_profile_can_force_orchestrated_xsq_sidecar_only(monkeypatch) -> Non
     )
 
     assert fake_engine.calls == [
-        ("v27.3", ["--template", "template.xsq", "--audio", "song.mp3"]),
+        (
+            "v27.3",
+            [*PRIME_BEAT_GRID_DEFAULTS, "--template", "template.xsq", "--audio", "song.mp3"],
+        ),
     ]
 
 
@@ -116,5 +138,8 @@ def test_run_profile_no_effects_orchestrator_skips_orchestration_and_strips_flag
 
     assert called is False
     assert fake_engine.calls == [
-        ("v27.3", ["--template", "template.xsq", "--audio", "song.mp3"]),
+        (
+            "v27.3",
+            [*PRIME_BEAT_GRID_DEFAULTS, "--template", "template.xsq", "--audio", "song.mp3"],
+        ),
     ]

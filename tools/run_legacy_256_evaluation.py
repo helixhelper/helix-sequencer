@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
+from core.lms_calibration import calibration_from_report
 from tools.compare_legacy_256_reports import compare_reports
 from tools.inspect_lms import inspect_lms
 from tools.legacy_256_manifest import validate_legacy_256_manifest_file
@@ -40,6 +41,7 @@ class Legacy256EvaluationReport:
     steps: list[dict[str, Any]] = field(default_factory=list)
     manifest_validation: dict[str, Any] = field(default_factory=dict)
     lms_inspection: dict[str, Any] = field(default_factory=dict)
+    lms_calibration: dict[str, Any] = field(default_factory=dict)
     comparison: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -55,6 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the full Legacy 256 calibration/evaluation workflow.")
     parser.add_argument("--manifest", default="fixtures/legacy_256/layout_256_manifest.json")
     parser.add_argument("--lms", default=None, help="Optional local GP/LMS file to inspect before running")
+    parser.add_argument(
+        "--acknowledge-reference-rights",
+        action="store_true",
+        help="Confirm rights and apply aggregate LMS calibration to each profile run",
+    )
+    parser.add_argument(
+        "--lms-calibration-strength",
+        type=float,
+        default=1.0,
+        help="Aggregate calibration strength passed to the engine (0.0-1.0)",
+    )
     parser.add_argument("--template", default="fixtures/legacy_256/converted/template.xsq")
     parser.add_argument("--audio", default="local_fixtures/legacy_256/audio/song.mp3")
     parser.add_argument("--layout-file", default="fixtures/legacy_256/converted/xlights_rgbeffects.xml")
@@ -76,6 +89,7 @@ def _profile_command(
     output_root: str,
     python_executable: str,
     dry_run: bool,
+    extra_engine_args: Sequence[str] = (),
 ) -> list[str]:
     profile_parser = build_profile_parser()
     args = profile_parser.parse_args([
@@ -91,6 +105,7 @@ def _profile_command(
         "--python",
         python_executable,
         *( ["--dry-run"] if dry_run else [] ),
+        *( ["--extra-engine-arg", *extra_engine_args] if extra_engine_args else [] ),
     ])
     return build_legacy_256_command(args)
 
@@ -113,10 +128,38 @@ def run_evaluation(args: argparse.Namespace) -> Legacy256EvaluationReport:
         errors.extend(str(item) for item in manifest_validation.get("errors", []) or [])
 
     lms_payload: dict[str, Any] = {}
+    calibration_payload: dict[str, Any] = {"enabled": False}
+    calibration_engine_args: list[str] = []
     if args.lms:
         lms_report = inspect_lms(args.lms)
         lms_payload = lms_report.to_dict()
         warnings.extend(str(item) for item in lms_payload.get("warnings", []) or [])
+        if args.acknowledge_reference_rights:
+            try:
+                calibration_profile = calibration_from_report(lms_report)
+            except ValueError as exc:
+                errors.append(str(exc))
+            else:
+                strength = min(1.0, max(0.0, float(args.lms_calibration_strength)))
+                calibration_payload = {
+                    "enabled": True,
+                    "strength": strength,
+                    "privacy_mode": "aggregate_only",
+                    "reference": calibration_profile.to_dict(),
+                }
+                calibration_engine_args = [
+                    "--lms-calibration-file",
+                    str(args.lms),
+                    "--lms-calibration-strength",
+                    str(strength),
+                    "--acknowledge-reference-rights",
+                ]
+        else:
+            warnings.append(
+                "LMS was inspected only. Add --acknowledge-reference-rights to apply aggregate calibration."
+            )
+    elif args.acknowledge_reference_rights:
+        errors.append("--acknowledge-reference-rights requires --lms.")
 
     if not args.dry_run and not args.skip_runs:
         for required_path, label in ((args.template, "template"), (args.audio, "audio"), (args.layout_file, "layout_file")):
@@ -133,6 +176,7 @@ def run_evaluation(args: argparse.Namespace) -> Legacy256EvaluationReport:
                 output_root=args.output_root,
                 python_executable=args.python,
                 dry_run=False,
+                extra_engine_args=calibration_engine_args,
             )
             if args.dry_run:
                 steps.append(Legacy256EvaluationStep(name=f"run_{profile}", command=command, skipped=True, notes=["dry_run"]))
@@ -163,6 +207,7 @@ def run_evaluation(args: argparse.Namespace) -> Legacy256EvaluationReport:
         steps=[step.to_dict() for step in steps],
         manifest_validation=manifest_validation,
         lms_inspection=lms_payload,
+        lms_calibration=calibration_payload,
         comparison=comparison_payload,
         warnings=warnings,
         errors=errors,

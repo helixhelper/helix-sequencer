@@ -92,6 +92,37 @@ class RunLegacy256EvaluationTests(unittest.TestCase):
         self.assertEqual(payload["comparison"]["winner"], "showcase")
         self.assertEqual(payload["errors"], [])
 
+    def test_rights_acknowledgement_applies_lms_calibration_to_profile_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            manifest = tmp_path / "manifest.json"
+            lms = tmp_path / "reference.lms"
+            manifest.write_text(json.dumps(_manifest()), encoding="utf-8")
+            lms.write_text(
+                """<sequence><channels><channel id="1" deviceType="LOR" unit="1" circuit="1" centiseconds="100"><effect type="intensity" startCentisecond="0" endCentisecond="100" startIntensity="100" endIntensity="0" /></channel></channels></sequence>""",
+                encoding="utf-8",
+            )
+            parser = build_parser()
+            args = parser.parse_args([
+                "--manifest",
+                str(manifest),
+                "--lms",
+                str(lms),
+                "--acknowledge-reference-rights",
+                "--profiles",
+                "legacy_256_clean",
+                "--output-root",
+                str(tmp_path / "runs"),
+                "--dry-run",
+            ])
+            report = run_evaluation(args)
+
+        command = report.steps[0]["command"]
+        self.assertTrue(report.lms_calibration["enabled"])
+        self.assertEqual(report.lms_calibration["privacy_mode"], "aggregate_only")
+        self.assertIn("--lms-calibration-file", command)
+        self.assertIn("--acknowledge-reference-rights", command)
+
     def test_real_run_records_subprocess_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

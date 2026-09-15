@@ -17,6 +17,7 @@ DRUM_SUBMODEL_BY_TYPE = {
 
 DRUM_PRIORITY = {"kick": 0, "snare": 1, "cymbal": 2, "tom": 3, "hihat": 4, "drum_bus": 5}
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER_V3"
+DRUMMER_LAYOUT_MODEL = "HX_SNOWMAN_DRUMMER"
 DRUMMER_V3_POSE_BY_TYPE = {
     "kick": "kick_hit",
     "snare": "snare_hit",
@@ -180,17 +181,26 @@ def drummer_v3_pose_for_event(event: DrumEvent, event_index: int = 0) -> str:
 def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
     """Map detected drum events to readable Drummer v3 pose/submodel targets."""
     mapped: list[dict[str, object]] = []
-    for index, event in enumerate(sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9)))):
-        pose = drummer_v3_pose_for_event(event, index)
-        duration = DRUMMER_V3_DURATION_BY_POSE.get(pose, 140)
+    type_indices: dict[str, int] = {}
+    for event in sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9))):
+        type_index = type_indices.get(event.drum_type, 0)
+        type_indices[event.drum_type] = type_index + 1
+        pose = drummer_v3_pose_for_event(event, type_index)
+        base_duration = DRUMMER_V3_DURATION_BY_POSE.get(pose, 140)
+        duration = max(70, int(round(base_duration * (0.82 + (0.36 * event.velocity)))))
         mapped.append(
             {
                 "timestamp_ms": event.timestamp_ms,
                 "end_ms": event.timestamp_ms + duration,
                 "model": DRUMMER_V3_MODEL,
+                "layout_model": DRUMMER_LAYOUT_MODEL,
                 "drum_type": event.drum_type,
                 "pose": pose,
                 "submodels": list(DRUMMER_V3_SUBMODELS_BY_POSE[pose]),
+                "layout_submodels": [
+                    name.replace(f"{DRUMMER_V3_MODEL}_", f"{DRUMMER_LAYOUT_MODEL}_", 1)
+                    for name in DRUMMER_V3_SUBMODELS_BY_POSE[pose]
+                ],
                 "intensity": round(event.velocity, 3),
                 "confidence": event.confidence,
                 "source": event.source,
