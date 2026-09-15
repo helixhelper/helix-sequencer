@@ -1,0 +1,65 @@
+name: Temporary GUI source patch
+
+on:
+  push:
+    branches:
+      - fix/beta-output-contract
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/beta-output-contract
+      - name: Patch GUI collision and output-folder handoff
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('gui_launcher.py')
+          s = p.read_text(encoding='utf-8')
+          old = s
+          s = s.replace('    def _options(self) -> BetaRunOptions:\n', '    def _run_options(self) -> BetaRunOptions:\n')
+          s = s.replace('        options = self._options()\n', '        options = self._run_options()\n')
+          s = s.replace(
+              '        quality = dict(payload.get("quality", {}) or {})\n        return {\n',
+              '        quality = dict(payload.get("quality", {}) or {})\n        output_contract = dict(payload.get("output_contract", {}) or {})\n        return {\n            "show_folder": str(output_contract.get("show_folder") or report_path.parent),\n',
+          )
+          s = s.replace(
+              '        folder = Path(self.output_var.get().strip() or DEFAULT_OUTPUT)\n        folder.mkdir(parents=True, exist_ok=True)\n',
+              '        summary_folder = str((self._latest_summary or {}).get("show_folder", "") or "").strip()\n        folder = Path(summary_folder or self.output_var.get().strip() or DEFAULT_OUTPUT)\n        folder.mkdir(parents=True, exist_ok=True)\n',
+          )
+          if s == old:
+              raise SystemExit('gui_launcher.py patch made no changes')
+          if 'def _options(self) -> BetaRunOptions' in s or 'options = self._options()' in s:
+              raise SystemExit('Tkinter _options collision remains')
+          p.write_text(s, encoding='utf-8')
+
+          t = Path('tests/test_gui_launcher.py')
+          text = t.read_text(encoding='utf-8')
+          if 'HelixGui,' not in text:
+              text = text.replace(
+                  '    BetaRunOptions,\n',
+                  '    BetaRunOptions,\n    HelixGui,\n',
+                  1,
+              )
+          marker = 'def test_gui_class_does_not_shadow_tkinter_options_helper()'
+          if marker not in text:
+              text += '''\n\ndef test_gui_class_does_not_shadow_tkinter_options_helper() -> None:\n    assert "_options" not in HelixGui.__dict__\n    assert "_run_options" in HelixGui.__dict__\n'''
+          t.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "helix-beta-repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add gui_launcher.py tests/test_gui_launcher.py
+          git diff --cached --check
+          git commit -m "fix(gui): avoid Tk options collision and open finalized show folder"
+          git push origin HEAD:fix/beta-output-contract
