@@ -181,9 +181,13 @@ def drummer_v3_pose_for_event(event: DrumEvent, event_index: int = 0) -> str:
 def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
     """Map detected drum events to readable Drummer v3 pose/submodel targets."""
     mapped: list[dict[str, object]] = []
-    for index, event in enumerate(sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9)))):
-        pose = drummer_v3_pose_for_event(event, index)
-        duration = DRUMMER_V3_DURATION_BY_POSE.get(pose, 140)
+    type_indices: dict[str, int] = {}
+    for event in sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9))):
+        type_index = type_indices.get(event.drum_type, 0)
+        type_indices[event.drum_type] = type_index + 1
+        pose = drummer_v3_pose_for_event(event, type_index)
+        base_duration = DRUMMER_V3_DURATION_BY_POSE.get(pose, 140)
+        duration = max(70, int(round(base_duration * (0.82 + (0.36 * event.velocity)))))
         mapped.append(
             {
                 "timestamp_ms": event.timestamp_ms,

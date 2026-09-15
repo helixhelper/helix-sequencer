@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Mapping
 
@@ -8,6 +9,7 @@ CANONICAL_DRUMMER_MODEL = "HX_SNOWMAN_DRUMMER"
 SOURCE_DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER_V3"
 SOURCE_PREFIX = f"{SOURCE_DRUMMER_V3_MODEL}_"
 LAYOUT_PREFIX = f"{CANONICAL_DRUMMER_MODEL}_"
+DRUMMER_REVIEW_TYPES = ("kick", "snare", "hihat", "tom", "cymbal", "drum_bus")
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,103 @@ def translate_drummer_cues(
                 )
             )
     return [placement.as_dict() for placement in placements]
+
+
+def build_drummer_review(
+    cues: Iterable[Mapping[str, Any]],
+    placement_results: Iterable[Mapping[str, Any]],
+) -> dict[str, object]:
+    """Build a compact, GUI-friendly audit of analyzed and rendered drum hits."""
+
+    cue_rows = sorted(
+        [dict(cue) for cue in cues],
+        key=lambda cue: (int(cue.get("start_ms", 0) or 0), str(cue.get("kind", ""))),
+    )
+    placement_rows = [dict(placement) for placement in placement_results]
+    placements_by_hit: dict[tuple[int, str, str], list[dict[str, object]]] = {}
+    for placement in placement_rows:
+        key = (
+            int(placement.get("start_ms", 0) or 0),
+            str(placement.get("drum_type", "drum_bus") or "drum_bus").lower(),
+            str(placement.get("pose", "") or ""),
+        )
+        placements_by_hit.setdefault(key, []).append(placement)
+
+    events: list[dict[str, object]] = []
+    for cue in cue_rows:
+        drum_type = str(cue.get("kind", "drum_bus") or "drum_bus").lower()
+        pose = str(cue.get("pose", f"{drum_type}_hit") or f"{drum_type}_hit")
+        start_ms = max(0, int(cue.get("start_ms", 0) or 0))
+        end_ms = max(start_ms + 1, int(cue.get("end_ms", start_ms + 140) or (start_ms + 140)))
+        matched = placements_by_hit.get((start_ms, drum_type, pose), [])
+        placed = [placement for placement in matched if bool(placement.get("placed", False))]
+        targets = sorted(
+            {
+                str(placement.get("target", "") or "")
+                for placement in matched
+                if str(placement.get("target", "") or "")
+            }
+        )
+        target_tiers = sorted(
+            {
+                str(placement.get("target_tier", "") or "")
+                for placement in matched
+                if str(placement.get("target_tier", "") or "")
+            }
+        )
+        placement_reasons = sorted(
+            {
+                str(placement.get("reason", "") or "")
+                for placement in matched
+                if str(placement.get("reason", "") or "")
+            }
+        )
+        events.append(
+            {
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "drum_type": drum_type,
+                "pose": pose,
+                "velocity": round(float(cue.get("velocity", 0.0) or 0.0), 3),
+                "confidence": round(float(cue.get("confidence", 0.0) or 0.0), 3),
+                "source": str(cue.get("source", "unknown") or "unknown"),
+                "section": str(cue.get("section", "") or ""),
+                "placed": bool(placed),
+                "placement_targets": targets,
+                "placed_target_count": len(placed),
+                "target_tiers": target_tiers,
+                "placement_reasons": placement_reasons,
+                "frequency_band_info": dict(cue.get("frequency_band_info", {}) or {}),
+            }
+        )
+
+    counts = Counter(str(event["drum_type"]) for event in events)
+    source_counts = Counter(str(event["source"]) for event in events)
+    confidences = [float(event["confidence"]) for event in events]
+    velocities = [float(event["velocity"]) for event in events]
+    placed_cues = sum(1 for event in events if bool(event["placed"]))
+    counts_by_type = {drum_type: int(counts.get(drum_type, 0)) for drum_type in DRUMMER_REVIEW_TYPES}
+    for drum_type in sorted(set(counts) - set(counts_by_type)):
+        counts_by_type[drum_type] = int(counts[drum_type])
+    if source_counts.get("drummer_x_multiband", 0):
+        analysis_profile = "drummer_x_hybrid_multiband"
+    elif source_counts.get("drummer_x_hybrid", 0):
+        analysis_profile = "drummer_x_hybrid"
+    else:
+        analysis_profile = source_counts.most_common(1)[0][0] if source_counts else "none"
+    return {
+        "analysis_profile": analysis_profile,
+        "events": events,
+        "counts_by_type": counts_by_type,
+        "source_counts": dict(sorted(source_counts.items())),
+        "average_confidence": round(sum(confidences) / len(confidences), 3) if confidences else 0.0,
+        "average_velocity": round(sum(velocities) / len(velocities), 3) if velocities else 0.0,
+        "low_confidence_events": sum(1 for value in confidences if value < 0.5),
+        "placed_cues": placed_cues,
+        "unplaced_cues": max(0, len(events) - placed_cues),
+        "cue_placement_ratio": round(placed_cues / len(events), 3) if events else 0.0,
+        "duration_ms": max((int(event["end_ms"]) for event in events), default=0),
+    }
 
 
 def build_timing_track(

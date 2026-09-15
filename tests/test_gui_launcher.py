@@ -94,6 +94,25 @@ def test_latest_drummer_summary_reads_render_counts(tmp_path: Path) -> None:
                     "placement_requests": 12,
                     "placed_effects": 10,
                     "timing_track_events": 10,
+                    "review": {
+                        "analysis_profile": "drummer_x_hybrid",
+                        "average_confidence": 0.78,
+                        "counts_by_type": {"kick": 3, "snare": 4},
+                        "events": [
+                            {
+                                "start_ms": 100,
+                                "end_ms": 240,
+                                "drum_type": "kick",
+                                "velocity": 0.9,
+                                "confidence": 0.82,
+                                "placed": True,
+                            }
+                        ],
+                        "placed_cues": 10,
+                        "unplaced_cues": 2,
+                        "cue_placement_ratio": 0.833,
+                        "duration_ms": 4000,
+                    },
                 },
                 "quality": {"score": 91.4, "grade": "A"},
             }
@@ -107,6 +126,10 @@ def test_latest_drummer_summary_reads_render_counts(tmp_path: Path) -> None:
     assert summary["fallback_mode"] == "typed_detection"
     assert summary["placed_effects"] == 10
     assert summary["quality_grade"] == "A"
+    assert summary["analysis_profile"] == "drummer_x_hybrid"
+    assert summary["average_confidence"] == 0.78
+    assert summary["counts_by_type"]["kick"] == 3
+    assert summary["events"][0]["placed"] is True
 
 
 def test_queue_writer_emits_complete_and_partial_lines() -> None:

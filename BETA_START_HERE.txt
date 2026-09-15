@@ -9,12 +9,20 @@ QUICK START
 4. Choose an audio file.
 5. Leave the green defaults selected for the first run.
 6. Click Build Sequence.
-7. Read the Drummer assessment strip, then click Open Output Folder.
+7. Read the Drummer assessment strip, then click Open Drummer X Review.
+8. Click timeline markers to inspect type, pose, confidence, velocity, source,
+   and whether the cue reached an xLights row.
+9. Click Open Output Folder when you are ready for native xLights review.
 
 WHAT THIS BETA PROVES
 - The packaged executable launches the GUI, not the old command-line entrypoint.
 - The engine runs in-process without unsafe Tk updates from a worker thread.
 - Typed drum detection and legacy fallback both reach one pose-aware drummer path.
+- Drummer X's useful design ideas are integrated without importing a second
+  runtime engine: five typed lanes, confidence/velocity review, a kit summary,
+  and hit-level xLights placement evidence.
+- Hat-versus-cymbal classification now uses a true early/late decay ratio at
+  2048/256 analysis resolution instead of treating loudness as decay.
 - Drummer V3 pose composites are actual xLights model geometry.
 - Accepted drum cues create real XSQ effects and an AUTO Drummer timing track.
 - The latest report records analyzed cues, requested placements, placed effects,
@@ -25,6 +33,8 @@ HOW TO ASSESS THE DRUMMER
 - "legacy_marks" or a bus fallback means the run remained functional, but the
   classification evidence was weaker.
 - placed effects should be greater than zero and reasonably close to requests.
+- Open Drummer X Review to see the five classified lanes. Red-outlined markers
+  were analyzed but not placed; marker size follows detected velocity.
 - In xLights, inspect HX_SNOWMAN_DRUMMER and the AUTO Drummer timing track.
 - Use a native xLights render for the final musical judgment. The Helix preview
   renderer is a diagnostic and can exaggerate brightness or overlap.

@@ -16,9 +16,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
+from drummer_review_gui import DrummerReviewWindow
+
 
 APP_TITLE = "Helix Sequence Weaver"
-BETA_LABEL = "Working Beta • Drummer V3"
+BETA_LABEL = "Working Beta • Drummer X + V3"
 LATEST_PRESET = "Helixville4 + Drummer V3"
 
 
@@ -169,6 +171,7 @@ def latest_drummer_summary(output_dir: Path) -> dict[str, Any] | None:
         except (OSError, ValueError):
             continue
         drummer = dict(payload.get("drummer", {}) or {})
+        review = dict(drummer.get("review", {}) or {})
         quality = dict(payload.get("quality", {}) or {})
         return {
             "report_path": str(report_path),
@@ -177,6 +180,16 @@ def latest_drummer_summary(output_dir: Path) -> dict[str, Any] | None:
             "placement_requests": int(drummer.get("placement_requests", 0) or 0),
             "placed_effects": int(drummer.get("placed_effects", 0) or 0),
             "timing_track_events": int(drummer.get("timing_track_events", 0) or 0),
+            "analysis_profile": str(review.get("analysis_profile", "legacy_report") or "legacy_report"),
+            "events": list(review.get("events", []) or []),
+            "counts_by_type": dict(review.get("counts_by_type", {}) or {}),
+            "average_confidence": float(review.get("average_confidence", 0.0) or 0.0),
+            "average_velocity": float(review.get("average_velocity", 0.0) or 0.0),
+            "low_confidence_events": int(review.get("low_confidence_events", 0) or 0),
+            "placed_cues": int(review.get("placed_cues", 0) or 0),
+            "unplaced_cues": int(review.get("unplaced_cues", 0) or 0),
+            "cue_placement_ratio": float(review.get("cue_placement_ratio", 0.0) or 0.0),
+            "duration_ms": int(review.get("duration_ms", 0) or 0),
             "quality_score": quality.get("score", ""),
             "quality_grade": quality.get("grade", ""),
         }
@@ -244,9 +257,10 @@ class HelixGui(tk.Tk):
         self.title(f"{APP_TITLE} — {BETA_LABEL}")
         self.geometry("1120x830")
         self.minsize(980, 720)
-        self.configure(bg="#10151d")
+        self.configure(bg="#0a0a0b")
         self._events: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._running = False
+        self._latest_summary: dict[str, Any] | None = None
 
         self.layout_presets = self._layout_presets()
         self.profile_var = tk.StringVar(value="master")
@@ -275,6 +289,7 @@ class HelixGui(tk.Tk):
         self._build_ui()
         self.after(80, self._drain_events)
         self.after(140, self._prepare_latest_layout_on_startup)
+        self.after(260, self._load_last_review)
 
     def _layout_presets(self) -> dict[str, Path]:
         presets = {LATEST_PRESET: LATEST_LAYOUT}
@@ -295,40 +310,42 @@ class HelixGui(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure(".", background="#151c26", foreground="#e6edf5", fieldbackground="#0f141c")
-        style.configure("TFrame", background="#10151d")
-        style.configure("TLabelframe", background="#151c26", foreground="#a8d7ff")
-        style.configure("TLabelframe.Label", background="#151c26", foreground="#75c8ff")
-        style.configure("TLabel", background="#151c26", foreground="#e6edf5")
+        style.configure(".", background="#121214", foreground="#f2f1ee", fieldbackground="#1a1a1e")
+        style.configure("TFrame", background="#0a0a0b")
+        style.configure("TLabelframe", background="#121214", foreground="#c4b48a")
+        style.configure("TLabelframe.Label", background="#121214", foreground="#c4b48a")
+        style.configure("TLabel", background="#121214", foreground="#f2f1ee")
         style.configure(
             "Header.TLabel",
-            background="#10151d",
-            foreground="#f4f8ff",
+            background="#0a0a0b",
+            foreground="#f2f1ee",
             font=("Segoe UI", 21, "bold"),
         )
         style.configure(
             "Beta.TLabel",
-            background="#10151d",
-            foreground="#65e6b4",
+            background="#0a0a0b",
+            foreground="#d4785a",
             font=("Segoe UI", 10, "bold"),
         )
         style.configure(
             "Status.TLabel",
-            background="#151c26",
-            foreground="#65e6b4",
+            background="#121214",
+            foreground="#7aada4",
             font=("Segoe UI", 10, "bold"),
         )
         style.configure("TButton", padding=(10, 7))
         style.configure(
             "Primary.TButton",
             font=("Segoe UI", 10, "bold"),
-            foreground="#081018",
-            background="#65e6b4",
+            foreground="#0a0a0b",
+            background="#d4785a",
         )
-        style.map("Primary.TButton", background=[("active", "#8cf0c9"), ("disabled", "#4d6b62")])
-        style.configure("TCheckbutton", background="#151c26", foreground="#dbe7f2")
-        style.configure("TCombobox", fieldbackground="#0f141c", foreground="#e6edf5")
-        style.configure("Horizontal.TProgressbar", background="#65e6b4", troughcolor="#222c39")
+        style.map("Primary.TButton", background=[("active", "#e08b70"), ("disabled", "#62463d")])
+        style.configure("Review.TButton", foreground="#f2f1ee", background="#2a2523")
+        style.map("Review.TButton", background=[("active", "#3a302c"), ("disabled", "#202024")])
+        style.configure("TCheckbutton", background="#121214", foreground="#e4e1db")
+        style.configure("TCombobox", fieldbackground="#1a1a1e", foreground="#f2f1ee")
+        style.configure("Horizontal.TProgressbar", background="#d4785a", troughcolor="#29292d")
 
     def _build_ui(self) -> None:
         pad = {"padx": 8, "pady": 5}
@@ -390,6 +407,14 @@ class HelixGui(tk.Tk):
             pady=7,
         )
         ttk.Label(drummer, textvariable=self.run_summary_var).pack(side=tk.LEFT, padx=18, pady=7)
+        self.review_button = ttk.Button(
+            drummer,
+            text="Open Drummer X Review",
+            style="Review.TButton",
+            command=self._open_drummer_review,
+            state=tk.DISABLED,
+        )
+        self.review_button.pack(side=tk.RIGHT, padx=10, pady=7)
 
         controls = ttk.LabelFrame(shell, text="3  Build options")
         controls.pack(fill=tk.X, **pad)
@@ -488,9 +513,9 @@ class HelixGui(tk.Tk):
             log_frame,
             wrap=tk.WORD,
             height=15,
-            bg="#0c1118",
-            fg="#d8e6f3",
-            insertbackground="#d8e6f3",
+            bg="#0a0a0b",
+            fg="#e4e1db",
+            insertbackground="#e4e1db",
             relief=tk.FLAT,
             font=("Cascadia Mono", 9),
         )
@@ -612,6 +637,28 @@ class HelixGui(tk.Tk):
         else:
             self.drummer_status_var.set(f"NOT READY • {info['state']}")
 
+    def _load_last_review(self) -> None:
+        summary = latest_drummer_summary(Path(self.output_var.get().strip() or DEFAULT_OUTPUT))
+        if summary is None:
+            return
+        self._latest_summary = summary
+        self.review_button.configure(state=tk.NORMAL)
+
+    def _open_drummer_review(self) -> None:
+        summary = self._latest_summary or latest_drummer_summary(
+            Path(self.output_var.get().strip() or DEFAULT_OUTPUT)
+        )
+        if summary is None:
+            messagebox.showinfo(
+                "No Drummer Review Yet",
+                "Build a sequence first. Helix will then expose the classified hit lanes and placement audit.",
+            )
+            return
+        self._latest_summary = summary
+        review = DrummerReviewWindow(self, summary)
+        review.transient(self)
+        review.focus_set()
+
     def _options(self) -> BetaRunOptions:
         return BetaRunOptions(
             profile=self.profile_var.get().strip() or "master",
@@ -710,11 +757,17 @@ class HelixGui(tk.Tk):
             self._log("Beta run complete.")
             summary = payload.get("summary")
             if isinstance(summary, dict):
+                self._latest_summary = summary
+                self.review_button.configure(state=tk.NORMAL)
                 summary_text = (
                     f"Drummer: {summary['placed_effects']}/{summary['placement_requests']} "
                     f"effects placed from {summary['analyzed_cues']} cues • "
                     f"{summary['fallback_mode']} detection"
                 )
+                if summary.get("events"):
+                    summary_text += (
+                        f" • {float(summary.get('average_confidence', 0.0)) * 100:.0f}% avg confidence"
+                    )
                 if summary.get("quality_grade") or summary.get("quality_score") != "":
                     quality = f"{summary.get('quality_grade', '')} {summary.get('quality_score', '')}".strip()
                     summary_text += f" • quality {quality}"

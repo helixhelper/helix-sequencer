@@ -148,7 +148,7 @@ def test_detected_drum_events_map_to_drummer_v3_pose_names() -> None:
     ]
     mapped = map_events_to_drummer_v3_poses(events)
     poses = [event["pose"] for event in mapped]
-    assert poses == ["kick_hit", "snare_hit", "hi_hat_pulse", "right_tom_hit", "both_crash"]
+    assert poses == ["kick_hit", "snare_hit", "hi_hat_pulse", "left_tom_hit", "both_crash"]
     assert mapped[1]["submodels"] == ["HX_SNOWMAN_DRUMMER_V3_HIT_SNARE"]
     assert mapped[1]["layout_model"] == "HX_SNOWMAN_DRUMMER"
     assert mapped[1]["layout_submodels"] == ["HX_SNOWMAN_DRUMMER_HIT_SNARE"]

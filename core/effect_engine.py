@@ -11957,6 +11957,10 @@ def run_variant(
     snowman_debug = snowman_band_payload.setdefault("debug", {})
     snowman_debug["drummer_effect_requests"] = len(drummer_placement_requests)
     snowman_debug["drummer_effects_placed"] = placed_drummer_effects
+    drummer_review = drummer_xlights.build_drummer_review(
+        drummer_cues,
+        drummer_placement_results,
+    )
     if placed_drummer_effects:
         log(
             "Drummer V3 sequence effects placed: "
@@ -12601,6 +12605,7 @@ def run_variant(
                     "",
                 )
             ),
+            "review": drummer_review,
         },
         "rhythm_intelligence": rhythm_intelligence_payload,
         "lyrics": {

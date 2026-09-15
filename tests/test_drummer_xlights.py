@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.drummer_xlights import build_timing_track, translate_drummer_cues
+from core.drummer_xlights import build_drummer_review, build_timing_track, translate_drummer_cues
 
 
 def _cue(**overrides: object) -> dict[str, object]:
@@ -56,3 +56,47 @@ def test_uses_root_model_as_last_resort_and_builds_timing_track() -> None:
 
 def test_returns_no_placements_when_layout_has_no_drummer_rows() -> None:
     assert translate_drummer_cues([_cue()], available_targets=["House", "MegaTree"]) == []
+
+
+def test_builds_hit_level_review_for_gui_and_audit() -> None:
+    kick = _cue(
+        start_ms=120,
+        end_ms=280,
+        kind="kick",
+        pose="kick_hit",
+        velocity=0.91,
+        confidence=0.83,
+        source="drummer_x_hybrid",
+    )
+    snare = _cue(
+        start_ms=420,
+        end_ms=560,
+        kind="snare",
+        pose="snare_hit",
+        velocity=0.68,
+        confidence=0.42,
+        source="legacy_drum_marks",
+    )
+    review = build_drummer_review(
+        [kick, snare],
+        [
+            {
+                "start_ms": 120,
+                "end_ms": 280,
+                "drum_type": "kick",
+                "pose": "kick_hit",
+                "target": "HX_SNOWMAN_DRUMMER/HX_SNOWMAN_DRUMMER_HIT_KICK",
+                "target_tier": "v3_pose",
+                "placed": True,
+            }
+        ],
+    )
+
+    assert review["analysis_profile"] == "drummer_x_hybrid"
+    assert review["counts_by_type"]["kick"] == 1
+    assert review["counts_by_type"]["snare"] == 1
+    assert review["placed_cues"] == 1
+    assert review["unplaced_cues"] == 1
+    assert review["low_confidence_events"] == 1
+    assert review["events"][0]["placed"] is True
+    assert review["events"][1]["placed"] is False
