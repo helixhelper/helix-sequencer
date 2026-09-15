@@ -48,6 +48,7 @@ jobs:
             tests/test_sequence_builder.py \
             tests/test_effect_engine_duration.py \
             tests/test_effect_engine_beat_grid_failure.py \
+            tests/test_beta_output_contract.py \
             tests/test_drum_mapping.py \
             tests/test_run_helix_e2e.py \
             tests/test_run_manager_redaction.py \
