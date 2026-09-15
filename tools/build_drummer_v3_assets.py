@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -90,6 +91,21 @@ def _ranges(nodes: set[int]) -> str:
     return ",".join(chunks)
 
 
+def _remap_nodes(nodes: set[int], node_by_cell: dict[int, int]) -> set[int]:
+    return {node_by_cell[cell] for cell in nodes if cell in node_by_cell}
+
+
+def _custom_model_text(width: int, height: int, node_by_cell: dict[int, int]) -> str:
+    rows: list[str] = []
+    for y in range(height):
+        cells = [
+            str(node_by_cell.get(y * width + x + 1, "."))
+            for x in range(width)
+        ]
+        rows.append(",".join(cells))
+    return ";".join(rows)
+
+
 def _prefixed(name: str) -> str:
     return f"{MODEL_NAME}_{name}"
 
@@ -123,12 +139,23 @@ def build_xmodel(spec: dict[str, Any], source_path: Path, xmodel_path: Path) -> 
             nodes.update(member_nodes)
         composite_nodes[composite_id] = nodes
 
+    active_cells = sorted({cell for nodes in zone_nodes.values() for cell in nodes})
+    node_by_cell = {cell: index for index, cell in enumerate(active_cells, start=1)}
+    zone_nodes = {name: _remap_nodes(nodes, node_by_cell) for name, nodes in zone_nodes.items()}
+    composite_nodes = {name: _remap_nodes(nodes, node_by_cell) for name, nodes in composite_nodes.items()}
+    custom_model = _custom_model_text(width, height, node_by_cell)
+    background_path = Path(os.path.relpath(source_path, xmodel_path.parent)).as_posix()
+
     root = ET.Element(
         "custommodel",
         {
             "name": MODEL_NAME,
+            "DisplayAs": "Custom",
             "parm1": str(width),
             "parm2": str(height),
+            "CustomWidth": str(width),
+            "CustomHeight": str(height),
+            "CustomModel": custom_model,
             "Depth": "1",
             "StringType": "RGB Nodes",
             "Transparency": "0",
@@ -136,8 +163,9 @@ def build_xmodel(spec: dict[str, Any], source_path: Path, xmodel_path: Path) -> 
             "ModelBrightness": "0",
             "Antialias": "1",
             "HelixImplementationState": "drummer_v3_asset_first_side_by_side",
-            "HelixVisualSource": str(source_path.relative_to(ROOT)),
-            "CustomBkgImage": str(source_path.resolve()),
+            "HelixVisualSource": source_path.relative_to(ROOT).as_posix(),
+            "HelixNodeCount": str(len(active_cells)),
+            "CustomBkgImage": background_path,
         },
     )
     ET.SubElement(root, "modelGroups")
@@ -171,6 +199,7 @@ def build_xmodel(spec: dict[str, Any], source_path: Path, xmodel_path: Path) -> 
         "zone_count": len(zone_nodes),
         "composite_count": len(composite_nodes),
         "submodel_count": len(zone_nodes) + len(composite_nodes),
+        "node_count": len(active_cells),
     }
 
 

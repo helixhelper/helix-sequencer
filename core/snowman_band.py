@@ -428,6 +428,7 @@ def _build_intelligent_drum_cues(
     )
     events = list(resolved["events"])
     mapped = list(resolved["mapped_events"])
+    pose_events = list(resolved["drummer_v3_pose_events"])
     motions = drummer_motion.build_drummer_motion(events)
     effect_cues = drum_effects.build_drum_effect_cues(events)
     cues: list[dict[str, Any]] = []
@@ -435,12 +436,23 @@ def _build_intelligent_drum_cues(
         start_ms = int(item["timestamp_ms"])
         drum_type = str(item["drum_type"])
         effect = effect_cues[idx] if idx < len(effect_cues) else {}
+        pose_event = pose_events[idx] if idx < len(pose_events) else {}
+        motion = motions[idx] if idx < len(motions) else {}
         cue = {
             "performer": "drummer",
             "start_ms": start_ms,
-            "end_ms": int(effect.get("end_ms", start_ms + 140)),
+            "end_ms": max(
+                int(effect.get("end_ms", start_ms + 140)),
+                int(pose_event.get("end_ms", start_ms + 140) or (start_ms + 140)),
+            ),
             "kind": drum_type,
             "section": _part_label(parts, start_ms),
+            "pose": str(pose_event.get("pose", f"{drum_type}_hit")),
+            "xlights_model": str(pose_event.get("layout_model", "HX_SNOWMAN_DRUMMER")),
+            "xlights_submodels": list(pose_event.get("layout_submodels", []) or []),
+            "source_model": str(pose_event.get("model", "HX_SNOWMAN_DRUMMER_V3")),
+            "source_submodels": list(pose_event.get("submodels", []) or []),
+            "motion": motion,
             "submodel": item["submodel"],
             "composite_submodels": item["composite_submodels"],
             "velocity": item["velocity"],
@@ -473,6 +485,7 @@ def _build_intelligent_drum_cues(
         "motion_events": motions,
         "effect_cues": effect_cues,
         "mapping": mapped,
+        "pose_mapping": pose_events,
     }
     return cues, kit, debug
 
@@ -924,18 +937,16 @@ def build_snowman_band_plan(
         beat_ms,
         band_sync_payload,
     )
-    if drum_event_streams:
-        drum_cues, kit_components, drum_intelligence_debug = _build_intelligent_drum_cues(
-            parts,
-            drum_event_streams=drum_event_streams,
-            kicks=kicks,
-            snares=snares,
-            hats=hats,
-            releases=releases,
-        )
-    else:
-        drum_cues, kit_components = _build_drum_cues(parts, kicks, snares, hats, releases)
-        drum_intelligence_debug = {"fallback_mode": "legacy_marks", "counts": {}, "motion_events": [], "effect_cues": [], "mapping": []}
+    # One active drummer path handles typed stems, bus fallback, and legacy marks.
+    # The original frame-only builder remains above as a compatibility reference.
+    drum_cues, kit_components, drum_intelligence_debug = _build_intelligent_drum_cues(
+        parts,
+        drum_event_streams=drum_event_streams,
+        kicks=kicks,
+        snares=snares,
+        hats=hats,
+        releases=releases,
+    )
     background_vocals = _build_background_vocals(vocal_peaks, parts)
     vocal_emotion_payload = vocal_emotion.build_vocal_emotion_timeline(
         lyric_timeline=lyric_timeline,

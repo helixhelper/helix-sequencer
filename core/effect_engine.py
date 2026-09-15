@@ -22,6 +22,7 @@ from core import audit as sequence_audit
 from core import audio_trigger_routes
 from core import audio_intelligence as ai
 from core import chronoflow as chronoflow_engine
+from core import drummer_xlights
 from core import helixualizer as helixualizer_engine
 from core import hardkor_engine
 from core import matrix_intelligence as matrix_planner
@@ -11068,6 +11069,7 @@ def run_variant(
     multiband_track: list[tuple[str, int, int]] = []
     hardkor_track: list[tuple[str, int, int]] = []
     birdsong_track: list[tuple[str, int, int]] = []
+    drummer_track: list[tuple[str, int, int]] = []
     part_track: list[tuple[str, int, int]] = [(part.label, part.start_ms, part.end_ms) for part in parts]
     drop_track: list[tuple[str, int, int]] = []
     birdsong_result = birdsong_engine.BirdsongResult(
@@ -11913,6 +11915,64 @@ def run_variant(
             if not structured_mode and part in dramatic_parts and flash_guard < 0.55 and rng.random() < (global_flash_prob * 0.25):
                 add_model(layout.all_white, t_ms, t_ms + dur, "white_vocal", cd_key="white", cd_ms=100, stem="vocals")
 
+    drummer_cues = list((snowman_band_payload.get("cues", {}) or {}).get("drummer", []) or [])
+    drummer_placement_requests = drummer_xlights.translate_drummer_cues(
+        drummer_cues,
+        available_targets=layers.keys(),
+    )
+    drummer_placement_results: list[dict[str, object]] = []
+    placed_drummer_effects = 0
+    for placement in drummer_placement_requests:
+        st = int(placement.get("start_ms", 0) or 0)
+        en = int(placement.get("end_ms", st + 140) or (st + 140))
+        label = str(placement.get("label", "drummer_pose") or "drummer_pose")
+        if in_blackout(st):
+            drummer_placement_results.append({**placement, "placed": False, "reason": "blackout"})
+            continue
+        before_count = int(stats.counts.get(label, 0))
+        add_model(
+            str(placement.get("target", "") or ""),
+            st,
+            en,
+            label,
+            eff=str(placement.get("effect", "On") or "On"),
+            stem="drums",
+        )
+        placed = int(stats.counts.get(label, 0)) > before_count
+        drummer_placement_results.append(
+            {**placement, "placed": placed, "reason": "placed" if placed else "placement_conflict"}
+        )
+        if placed:
+            placed_drummer_effects += 1
+            drummer_track.append(
+                (
+                    f"{placement.get('drum_type', 'hit')}:{placement.get('pose', 'pose')}",
+                    st,
+                    en,
+                )
+            )
+
+    snowman_translation = snowman_band_payload.setdefault("xlights_translation", {})
+    snowman_translation["drummer_effect_placements"] = drummer_placement_results
+    snowman_debug = snowman_band_payload.setdefault("debug", {})
+    snowman_debug["drummer_effect_requests"] = len(drummer_placement_requests)
+    snowman_debug["drummer_effects_placed"] = placed_drummer_effects
+    drummer_review = drummer_xlights.build_drummer_review(
+        drummer_cues,
+        drummer_placement_results,
+    )
+    if placed_drummer_effects:
+        log(
+            "Drummer V3 sequence effects placed: "
+            f"{placed_drummer_effects}/{len(drummer_placement_requests)} "
+            f"from {len(drummer_cues)} analyzed cues"
+        )
+    elif drummer_cues:
+        log(
+            "[WARN] Drummer cues were analyzed but no compatible drummer model/submodel "
+            "rows were available for XSQ placement."
+        )
+
     lyric_track: list[tuple[str, int, int]] = []
     if tuning.sync_lyrics_heads and lyric_events:
         lyric_targets_pool = next((pool for pool in pools if pool.category == "talking_heads" and pool.models), None)
@@ -12313,12 +12373,14 @@ def run_variant(
         base.write_timing_track(xsq.root, f"AUTO hardKor {style.version}", hardkor_track[:2400], active=False)
     if chronoflow_track:
         base.write_timing_track(xsq.root, f"AUTO Chronoflow {style.version}", chronoflow_track[:1400], active=False)
-        if snowman_band_track:
-            base.write_timing_track(xsq.root, f"AUTO Snowman Band {style.version}", snowman_band_track[:1800], active=False)
-        if snowman_sequence_face_track:
-            base.write_timing_track(xsq.root, f"AUTO Snowman Faces {style.version}", snowman_sequence_face_track[:1800], active=False)
-        if birdsong_track:
-            base.write_timing_track(xsq.root, f"AUTO Birdsong {style.version}", birdsong_track[:2000], active=False)
+    if snowman_band_track:
+        base.write_timing_track(xsq.root, f"AUTO Snowman Band {style.version}", snowman_band_track[:1800], active=False)
+    if snowman_sequence_face_track:
+        base.write_timing_track(xsq.root, f"AUTO Snowman Faces {style.version}", snowman_sequence_face_track[:1800], active=False)
+    if drummer_track:
+        base.write_timing_track(xsq.root, f"AUTO Drummer {style.version}", drummer_track[:2400], active=False)
+    if birdsong_track:
+        base.write_timing_track(xsq.root, f"AUTO Birdsong {style.version}", birdsong_track[:2000], active=False)
     if spatial_track:
         base.write_timing_track(xsq.root, f"AUTO Spatial Chase {style.version}", spatial_track, active=False)
     if lyric_track:
@@ -12343,6 +12405,9 @@ def run_variant(
             f"AUTO Audio Reactive {style.version}",
             f"AUTO hardKor {style.version}",
             f"AUTO Chronoflow {style.version}",
+            f"AUTO Snowman Band {style.version}",
+            f"AUTO Snowman Faces {style.version}",
+            f"AUTO Drummer {style.version}",
             f"AUTO Birdsong {style.version}",
             f"AUTO Spatial Chase {style.version}",
             f"AUTO Lyrics {style.version}",
@@ -12528,6 +12593,19 @@ def run_variant(
             "effect_counts": audio_reactive_summary.get("effect_counts", {}),
             "routes": audio_reactive_summary.get("routes", []),
             "catalog": audio_reactive_summary.get("catalog", []),
+        },
+        "drummer": {
+            "analyzed_cues": len(drummer_cues),
+            "placement_requests": len(drummer_placement_requests),
+            "placed_effects": placed_drummer_effects,
+            "timing_track_events": len(drummer_track),
+            "fallback_mode": (
+                ((snowman_band_payload.get("kit", {}) or {}).get("drum_intelligence", {}) or {}).get(
+                    "fallback_mode",
+                    "",
+                )
+            ),
+            "review": drummer_review,
         },
         "rhythm_intelligence": rhythm_intelligence_payload,
         "lyrics": {

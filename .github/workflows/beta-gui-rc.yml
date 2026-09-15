@@ -1,0 +1,75 @@
+name: Helix Windows Beta RC
+
+on:
+  push:
+    branches:
+      - 'beta/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helix-windows-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-windows-beta:
+    name: package / windows beta
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-beta.txt
+
+      - name: Install beta dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-beta.txt
+
+      - name: Compile beta sources
+        run: |
+          python -m compileall core audio animation effects mapping tools xlights gui_launcher.py
+
+      - name: Run focused GUI and drummer tests
+        run: |
+          python -m pytest -q tests/test_gui_launcher.py tests/test_drum_detection.py tests/test_drummer_xlights.py tests/test_drummer_v3_layout.py tests/test_snowman_drummer_integration.py tests/test_drummer_v3_pose_sheet.py tests/test_drum_mapping.py tests/test_working_drummer.py tests/test_finished_helixville4_drummer.py tests/test_effect_engine_beat_grid_failure.py
+
+      - name: Validate source GUI resources
+        run: python gui_launcher.py --self-check
+
+      - name: Build GUI executable
+        run: python -m PyInstaller --noconfirm --clean dream_sequence_weaver.spec
+
+      - name: Validate packaged GUI resources
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath ".\dist\HelixSequenceWeaverBeta.exe" -ArgumentList "--self-check" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged GUI self-check failed with exit code $($process.ExitCode)"
+          }
+
+      - name: Assemble laptop beta
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force beta-release | Out-Null
+          Copy-Item dist\HelixSequenceWeaverBeta.exe beta-release\
+          Copy-Item launch_sequencer_app.cmd beta-release\
+          Copy-Item BETA_START_HERE.txt beta-release\
+
+      - name: Upload Windows beta artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-working-beta-windows-${{ github.sha }}
+          path: beta-release/
+          if-no-files-found: error
+          retention-days: 14
