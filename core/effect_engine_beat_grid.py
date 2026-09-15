@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Iterable
 
 from core.beat_grid_runtime import parse_beat_grid_runtime_args
+from core import beta_output_contract
 from core import effect_engine
 from core import self_improving_scoring
 from core.controller_parser import build_controller_plan, write_networks_for_xsq_outputs
@@ -340,6 +342,43 @@ def autosize_controller_sidecars(
     }
 
 
+def _layout_supports_output_contract(layout_path: Path | None) -> bool:
+    if layout_path is None or not layout_path.exists():
+        return False
+    try:
+        root = ET.parse(layout_path).getroot()
+    except (OSError, ET.ParseError):
+        return False
+    return root.find(".//models/model") is not None
+
+
+def _finalize_beta_outputs(
+    config: RunConfig,
+    cleaned_args: list[str],
+    changed_xsq: list[Path],
+) -> list[dict[str, object]]:
+    requested_audio = _requested_audio_paths(cleaned_args)
+    if not changed_xsq or not requested_audio or not _layout_supports_output_contract(config.layout_path):
+        return []
+    assert config.layout_path is not None
+    summaries = beta_output_contract.finalize_generated_outputs(
+        changed_xsq,
+        layout_path=config.layout_path,
+        audio_paths=requested_audio,
+    )
+    for summary in summaries:
+        drummer = dict(summary.get("drummer", {}) or {})
+        effect_engine.log(
+            "Beta output contract: "
+            f"xsq={Path(str(summary.get('xsq_path', ''))).name} "
+            f"models={summary.get('effect_model_rows', 0)} "
+            f"effects={summary.get('model_effects', 0)} "
+            f"drummer={drummer.get('placed_effects', 0)} "
+            f"media={summary.get('media_file', '')}"
+        )
+    return summaries
+
+
 def main_for(version: str, argv: list[str] | None = None) -> None:
     """Run effect_engine while consuming BeatGrid runtime flags."""
 
@@ -356,12 +395,18 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     _run_effect_engine_with_failure_capture(version, cleaned_args)
     changed_xsq = _changed_xsq_outputs(roots, before_xsq)
     _verify_requested_xsq_outputs(version, cleaned_args, before=before_xsq)
-    controller_summary = autosize_controller_sidecars(
-        version,
-        cleaned_args,
-        since=started,
-        before=before_xsq,
-    )
+    finalized = _finalize_beta_outputs(config, cleaned_args, changed_xsq)
+
+    controller_summary = None
+    if not finalized:
+        controller_summary = autosize_controller_sidecars(
+            version,
+            cleaned_args,
+            since=started,
+            before=before_xsq,
+        )
+    elif config.autosize_controllers:
+        effect_engine.log("Controller autosize satisfied by finalized xLights show folder.")
     if controller_summary is not None:
         effect_engine.log(
             "Controller autosize: "
