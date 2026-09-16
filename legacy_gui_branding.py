@@ -125,6 +125,12 @@ def _open_support(url: str) -> None:
         messagebox.showerror("Could Not Open Browser", str(exc))
 
 
+def _invoke_root_method(root: tk.Tk, method_name: str) -> None:
+    callback = getattr(root, method_name, None)
+    if callable(callback):
+        callback()
+
+
 def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
     """Restore the original Helix identity/support affordances onto the beta GUI.
 
@@ -152,8 +158,10 @@ def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
     image_panel = ttk.Frame(legacy_panel)
     image_panel.pack(side=tk.LEFT, padx=(0, 8))
 
-    mascot_photo = _load_photo(resolve(MASCOT_FILENAME), 56, 56)
-    logo_photo = _load_photo(resolve(LOGO_FILENAME), 42, 42)
+    # Keep the original art visible without making the banner tall enough to
+    # push primary run controls below common 768px laptop screens.
+    mascot_photo = _load_photo(resolve(MASCOT_FILENAME), 48, 48)
+    logo_photo = _load_photo(resolve(LOGO_FILENAME), 36, 36)
     photos = [photo for photo in (mascot_photo, logo_photo) if photo is not None]
     # Retain references so Tk does not garbage-collect the images.
     setattr(root, "_legacy_branding_photos", photos)
@@ -165,23 +173,39 @@ def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
 
     buttons = ttk.Frame(legacy_panel)
     buttons.pack(side=tk.RIGHT, anchor="ne")
+
+    # Keep the primary actions in the always-visible header. The main UI still
+    # retains its lower action bar for larger screens, but these controls make
+    # the beta usable on 768px-tall Windows laptops where the lower bar can be
+    # clipped after restoring the legacy mascot/banner.
+    ttk.Button(
+        buttons,
+        text="Run Sequence",
+        style="Primary.TButton",
+        command=lambda: _invoke_root_method(root, "_run_sequence"),
+    ).grid(row=0, column=0, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Instructions",
         command=lambda: open_instructions(root, resolve),
-    ).grid(row=0, column=0, padx=3, pady=2)
+    ).grid(row=0, column=1, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Legal",
         command=lambda: open_legal(root, resolve),
-    ).grid(row=0, column=1, padx=3, pady=2)
+    ).grid(row=0, column=2, padx=3, pady=2)
+    ttk.Button(
+        buttons,
+        text="Open Output",
+        command=lambda: _invoke_root_method(root, "_open_output_folder"),
+    ).grid(row=1, column=0, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Support Author",
         command=lambda: _open_support(AUTHOR_SUPPORT_URL),
-    ).grid(row=1, column=0, padx=3, pady=2)
+    ).grid(row=1, column=1, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Support xLights",
         command=lambda: _open_support(SUPPORT_DONATE_URL),
-    ).grid(row=1, column=1, padx=3, pady=2)
+    ).grid(row=1, column=2, padx=3, pady=2)
