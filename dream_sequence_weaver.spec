@@ -41,6 +41,7 @@ hiddenimports = [
     "core.drummer_xlights",
     "core.effect_engine",
     "core.effect_engine_beat_grid",
+    "core.effect_engine_runner",
     "core.engine_profiles",
     "core.model_parser",
     "core.sequence_builder",
