@@ -45,6 +45,7 @@ hiddenimports = [
     "core.engine_profiles",
     "core.model_parser",
     "core.sequence_builder",
+    "core.xsq_duration_guard",
     "audio.drum_classification",
     "audio.drum_detection",
     "animation.drummer_motion",
