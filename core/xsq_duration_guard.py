@@ -131,6 +131,45 @@ def _model_effect_counts(root: ET.Element) -> dict[str, int]:
     }
 
 
+def _dedupe_drummer_on_effects(root: ET.Element) -> int:
+    """Remove redundant Drummer V3 On effects created by recovery materialization.
+
+    The legacy engine can render a drummer cue successfully and also emit an
+    AUTO Drummer timing event for the same cue. The beta finalizer consumes that
+    timing evidence as a recovery path, so without a final guard the same target
+    can receive a second identical On interval on another layer. Restrict the
+    cleanup to Drummer V3 model rows and exact On start/end intervals so normal
+    multi-layer effects elsewhere remain untouched.
+    """
+
+    effects_root = root.find("./ElementEffects")
+    if effects_root is None:
+        return 0
+
+    removed = 0
+    for element in effects_root.findall("Element"):
+        kind = str(element.attrib.get("type", "") or "").strip().lower()
+        name = str(element.attrib.get("name", "") or "").strip()
+        if kind != "model" or not name.startswith(DRUMMER_MODEL_PREFIX):
+            continue
+
+        seen: set[tuple[int, int]] = set()
+        for layer in element.findall(".//EffectLayer"):
+            for effect in list(layer.findall("Effect")):
+                effect_name = str(effect.attrib.get("name", "") or "").strip().lower()
+                if effect_name != "on":
+                    continue
+                times = _effect_times(effect)
+                if times is None:
+                    continue
+                if times in seen:
+                    layer.remove(effect)
+                    removed += 1
+                    continue
+                seen.add(times)
+    return removed
+
+
 def _update_json_metadata(path: Path, key: str, summary: dict[str, Any]) -> None:
     if not path.is_file():
         return
@@ -159,16 +198,20 @@ def _update_json_metadata(path: Path, key: str, summary: dict[str, Any]) -> None
 
 
 def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
-    """Remove or clip effects that extend past the finalized song duration.
+    """Normalize duplicate drummer recovery effects and finalized song duration.
 
     Legacy templates can carry timing marks far beyond the selected song. Those
     marks must not extend a generated sequence or diagnostic preview. The media
     duration is authoritative when it can be read; otherwise the finalized XSQ
     ``sequenceDuration`` is used.
 
-    If a sequence had model effects before normalization, trimming is not allowed
-    to silently turn it back into a timing-only sequence. That protects the beta
-    output contract even though duration cleanup happens after materialization.
+    The beta finalizer also has a deliberate Drummer V3 recovery path that can
+    materialize AUTO Drummer timing evidence. If the legacy engine already wrote
+    the same On interval, exact drummer duplicates are removed here before final
+    contract counts are persisted.
+
+    If a sequence had model effects before duration trimming, cleanup is not
+    allowed to silently turn it back into a timing-only sequence.
     """
 
     xsq_path = Path(xsq_path)
@@ -176,6 +219,8 @@ def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
     root = tree.getroot()
     duration_ms, duration_source = _resolved_duration_ms(xsq_path, root)
     effects_root = root.find("./ElementEffects")
+    raw_counts = _model_effect_counts(root)
+    drummer_duplicates_removed = _dedupe_drummer_on_effects(root)
     before_counts = _model_effect_counts(root)
 
     removed = 0
@@ -226,13 +271,16 @@ def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
             f"{xsq_path}"
         )
 
-    if removed or clipped:
+    if drummer_duplicates_removed or removed or clipped:
         ET.indent(tree, space="  ")
         tree.write(xsq_path, encoding="utf-8", xml_declaration=True)
 
     summary: dict[str, Any] = {
         "duration_ms": duration_ms,
         "duration_source": duration_source,
+        "drummer_duplicate_effects_removed": drummer_duplicates_removed,
+        "model_effects_raw_before_dedupe": raw_counts["model_effects"],
+        "drummer_model_effects_raw_before_dedupe": raw_counts["drummer_model_effects"],
         "removed_effects": removed,
         "clipped_effects": clipped,
         "removed_timing_effects": removed_timing,
