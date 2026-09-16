@@ -194,6 +194,7 @@ class RunManager:
 
 def _manifest_data(ctx: RunContext) -> dict[str, object]:
     config = ctx.config
+    audio_paths = config.resolved_audio_paths()
     return {
         "schema": MANIFEST_SCHEMA,
         "app": APP_NAME,
@@ -202,7 +203,8 @@ def _manifest_data(ctx: RunContext) -> dict[str, object]:
         "started_at": ctx.started_at,
         "finished_at": ctx.finished_at,
         "status": ctx.status,
-        "audio_path": _path_value(config.audio_path),
+        "audio_path": _path_value(audio_paths[0] if audio_paths else None),
+        "audio_paths": [str(path) for path in audio_paths],
         "template_path": _path_value(config.template_path),
         "layout_path": _path_value(config.layout_path),
         "output_root": str(config.output_root),
