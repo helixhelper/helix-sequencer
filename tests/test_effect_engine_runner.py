@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -91,3 +92,55 @@ def test_runner_restores_logger_when_engine_raises_directly() -> None:
         run_effect_engine("v27.3", [], engine_module=engine)
 
     assert engine.log is original_log
+
+
+def test_runner_serializes_calls_that_share_legacy_global_logger_state() -> None:
+    """A second strict run must not replace the logger while the first is active."""
+
+    first_entered = Event()
+    release_first = Event()
+    second_started = Event()
+    second_entered = Event()
+    errors: list[BaseException] = []
+
+    def first_main(_version: str, _argv: list[str]) -> None:
+        first_entered.set()
+        assert release_first.wait(timeout=2.0)
+
+    def second_main(_version: str, _argv: list[str]) -> None:
+        second_entered.set()
+
+    first_engine = _fake_engine(first_main, [])
+    second_engine = _fake_engine(second_main, [])
+
+    def run_first() -> None:
+        try:
+            run_effect_engine("v27.3", [], engine_module=first_engine)
+        except BaseException as exc:  # pragma: no cover - assertion aid
+            errors.append(exc)
+
+    def run_second() -> None:
+        second_started.set()
+        try:
+            run_effect_engine("v27.3", [], engine_module=second_engine)
+        except BaseException as exc:  # pragma: no cover - assertion aid
+            errors.append(exc)
+
+    first_thread = Thread(target=run_first)
+    second_thread = Thread(target=run_second)
+    first_thread.start()
+    assert first_entered.wait(timeout=1.0)
+    second_thread.start()
+    assert second_started.wait(timeout=1.0)
+
+    # The second thread has reached the runner but cannot enter its legacy
+    # engine until the first invocation releases the adapter lock.
+    assert second_entered.wait(timeout=0.05) is False
+    release_first.set()
+
+    first_thread.join(timeout=2.0)
+    second_thread.join(timeout=2.0)
+    assert first_thread.is_alive() is False
+    assert second_thread.is_alive() is False
+    assert second_entered.is_set() is True
+    assert errors == []
