@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import wave
 import xml.etree.ElementTree as ET
@@ -10,6 +11,7 @@ from typing import Any, Iterable
 
 from core.controller_parser import build_controller_plan, write_networks_file
 from core.model_parser import parse_layout
+from core.xlights_layout_compat import normalize_xlights_model_types, preflight_xlights_layout
 from xlights import layout_sync, xml_io
 
 
@@ -19,9 +21,25 @@ GENERAL_LAYER = "AUTO_Helix_Beta"
 DRUMMER_LAYER = "AUTO_Helix_Drummer_V3"
 SHOW_MANIFEST_SUFFIX = ".show.json"
 MAX_GENERAL_EFFECTS = 1400
+MIN_GENERAL_MODEL_PARTICIPATION = 2
+GENERAL_MODEL_PARTICIPATION_RATIO = 0.05
+MAX_REQUIRED_GENERAL_MODELS = 12
 
 DRUMMER_MODEL = "HX_SNOWMAN_DRUMMER"
 DRUMMER_PREFIX = f"{DRUMMER_MODEL}/HX_SNOWMAN_DRUMMER_"
+
+_CHANNEL_KEYS = (
+    "ChannelCount",
+    "channelCount",
+    "Channels",
+    "channels",
+    "NumChannels",
+    "numChannels",
+    "MaxChannels",
+    "maxChannels",
+    "Size",
+    "size",
+)
 
 
 def _root_child(root: ET.Element, tag: str) -> ET.Element:
@@ -110,16 +128,29 @@ def _drummer_timing_events(root: ET.Element) -> list[dict[str, object]]:
 
 
 def _audio_duration_seconds(path: Path) -> float | None:
-    if path.suffix.lower() != ".wav":
+    if path.suffix.lower() == ".wav":
+        try:
+            with wave.open(str(path), "rb") as stream:
+                rate = int(stream.getframerate())
+                frames = int(stream.getnframes())
+            if rate <= 0 or frames <= 0:
+                return None
+            return frames / float(rate)
+        except (OSError, wave.Error):
+            return None
+
+    # Mutagen is optional. When present it gives Helix a portable duration path
+    # for MP3/M4A/FLAC without making beta generation depend on the package.
+    try:
+        from mutagen import File as mutagen_file  # type: ignore[import-not-found]
+    except Exception:
         return None
     try:
-        with wave.open(str(path), "rb") as stream:
-            rate = int(stream.getframerate())
-            frames = int(stream.getnframes())
-        if rate <= 0 or frames <= 0:
-            return None
-        return frames / float(rate)
-    except (OSError, wave.Error):
+        audio = mutagen_file(str(path))
+        info = getattr(audio, "info", None)
+        length = float(getattr(info, "length", 0.0) or 0.0)
+        return length if length > 0 else None
+    except Exception:
         return None
 
 
@@ -133,7 +164,9 @@ def _bind_media(root: ET.Element, audio_path: Path) -> dict[str, object]:
     media = head.find("mediaFile")
     if media is None:
         media = ET.SubElement(head, "mediaFile")
-    media.text = str(audio_path.resolve())
+    # The finalizer copies media beside the XSQ. A relative reference keeps the
+    # show portable if the folder is moved to another machine or directory.
+    media.text = audio_path.name
 
     duration = _audio_duration_seconds(audio_path)
     if duration is not None:
@@ -143,11 +176,10 @@ def _bind_media(root: ET.Element, audio_path: Path) -> dict[str, object]:
         duration_el.text = f"{duration:.3f}"
 
     return {
-        "media_file": str(audio_path.resolve()),
+        "media_file": audio_path.name,
+        "media_resolved_path": str(audio_path.resolve()),
         "media_exists": audio_path.exists(),
-        "sequence_duration": (
-            str(head.findtext("sequenceDuration", default="") or "").strip()
-        ),
+        "sequence_duration": str(head.findtext("sequenceDuration", default="") or "").strip(),
     }
 
 
@@ -163,13 +195,55 @@ def _layout_root_model_names(layout_path: Path) -> list[str]:
     ]
 
 
-def normalize_preview_channels(layout_path: Path) -> dict[str, object]:
-    """Assign deterministic absolute channels to root models in a preview layout.
+def _positive_int(attrs: dict[str, str], *keys: str) -> int:
+    for key in keys:
+        raw = str(attrs.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(round(float(raw)))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
 
-    The beta previously shipped very large placeholder StartChannel values. For
-    preview/show-folder output we intentionally use sequential absolute channels.
-    Three channels per parsed pixel is conservative for RGB models and harmlessly
-    leaves extra space for single-color models.
+
+def _model_channel_span(model) -> int:
+    raw = dict(getattr(model, "raw_attrs", {}) or {})
+    explicit = _positive_int(raw, *_CHANNEL_KEYS)
+    if explicit > 0:
+        return explicit
+    pixels = max(1, int(getattr(model, "total_pixels", 1) or 1))
+    if bool(getattr(model, "is_rgb_capable", lambda: False)()):
+        return pixels * 3
+    return pixels
+
+
+def _ranges_overlap(allocations: list[dict[str, object]]) -> int:
+    ordered = sorted(
+        allocations,
+        key=lambda item: (int(item["start_channel"]), int(item["end_channel"]), str(item["model"])),
+    )
+    overlaps = 0
+    previous: dict[str, object] | None = None
+    for allocation in ordered:
+        if previous is not None and int(allocation["start_channel"]) <= int(previous["end_channel"]):
+            overlaps += 1
+            if int(allocation["end_channel"]) > int(previous["end_channel"]):
+                previous = allocation
+        else:
+            previous = allocation
+    return overlaps
+
+
+def normalize_preview_channels(layout_path: Path) -> dict[str, object]:
+    """Make preview channel addressing deterministic without destroying good data.
+
+    Compact, positive, non-overlapping absolute channel assignments are preserved.
+    Sparse placeholder ranges and unresolved/dynamic assignments are replaced with
+    sequential absolute channels. Channel span is based on the parsed model's
+    StringType/NumChannels rather than assuming every node consumes three channels.
     """
 
     layout_path = Path(layout_path)
@@ -180,15 +254,56 @@ def normalize_preview_channels(layout_path: Path) -> dict[str, object]:
     if models_el is None:
         raise RuntimeError(f"Layout has no <models> section: {layout_path}")
 
-    cursor = 1
-    allocations: list[dict[str, object]] = []
+    model_rows: list[tuple[ET.Element, object, int]] = []
+    sequential_total = 0
+    existing: list[dict[str, object]] = []
+    existing_is_numeric = True
     for model_el in list(models_el):
         name = str(model_el.attrib.get("name", "") or "").strip()
         if not name:
             continue
         model = parsed.models.get(name)
-        pixels = max(1, int(getattr(model, "total_pixels", 1) or 1)) if model is not None else 1
-        span = max(3, pixels * 3)
+        span = _model_channel_span(model) if model is not None else 1
+        sequential_total += span
+        model_rows.append((model_el, model, span))
+        start = getattr(model, "start_channel", None) if model is not None else None
+        if start is None or int(start) <= 0:
+            existing_is_numeric = False
+            continue
+        start_int = int(start)
+        existing.append(
+            {
+                "model": name,
+                "start_channel": start_int,
+                "end_channel": start_int + span - 1,
+                "channels": span,
+            }
+        )
+
+    existing_overlap_count = _ranges_overlap(existing) if existing_is_numeric and len(existing) == len(model_rows) else 0
+    max_existing_end = max((int(item["end_channel"]) for item in existing), default=0)
+    compact_limit = max(sequential_total * 4, sequential_total + 4096)
+    preserve_existing = (
+        existing_is_numeric
+        and len(existing) == len(model_rows)
+        and existing_overlap_count == 0
+        and max_existing_end <= compact_limit
+    )
+
+    if preserve_existing:
+        return {
+            "models": len(existing),
+            "channel_count": max_existing_end,
+            "overlap_count": 0,
+            "allocations": existing,
+            "preserved_existing": True,
+            "rewritten": False,
+        }
+
+    cursor = 1
+    allocations: list[dict[str, object]] = []
+    for model_el, _model, span in model_rows:
+        name = str(model_el.attrib.get("name", "") or "").strip()
         start = cursor
         end = start + span - 1
         model_el.attrib["StartChannel"] = str(start)
@@ -209,6 +324,8 @@ def normalize_preview_channels(layout_path: Path) -> dict[str, object]:
         "channel_count": max(0, cursor - 1),
         "overlap_count": 0,
         "allocations": allocations,
+        "preserved_existing": False,
+        "rewritten": True,
     }
 
 
@@ -219,7 +336,13 @@ def _copy_show_inputs(xsq_path: Path, *, layout_path: Path, audio_path: Path) ->
     copied_layout = show_dir / LAYOUT_FILENAME
     if layout_path.resolve() != copied_layout.resolve(strict=False):
         shutil.copy2(layout_path, copied_layout)
+
+    normalization = normalize_xlights_model_types(copied_layout)
     channels = normalize_preview_channels(copied_layout)
+    preflight = preflight_xlights_layout(copied_layout)
+    if not bool(preflight.get("ok")):
+        errors = "; ".join(str(item) for item in list(preflight.get("errors", []) or []))
+        raise RuntimeError(f"xLights layout preflight failed for {copied_layout}: {errors}")
 
     copied_audio = show_dir / audio_path.name
     if audio_path.resolve() != copied_audio.resolve(strict=False):
@@ -235,6 +358,8 @@ def _copy_show_inputs(xsq_path: Path, *, layout_path: Path, audio_path: Path) ->
         "networks_path": networks,
         "channels": channels,
         "controller": plan.to_dict(),
+        "model_type_normalization": normalization,
+        "layout_preflight": preflight,
     }
 
 
@@ -245,15 +370,33 @@ def _model_effect_rows(root: ET.Element) -> list[ET.Element]:
     return [element for element in list(effects) if _element_type(element) == "model"]
 
 
-def _count_model_effects(root: ET.Element) -> tuple[int, int]:
-    total = 0
-    models = 0
+def _model_effect_counts(root: ET.Element) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for row in _model_effect_rows(root):
-        count = sum(1 for effect in row.iter() if str(effect.tag).endswith("Effect"))
-        total += count
-        if count:
-            models += 1
-    return total, models
+        name = _element_name(row)
+        if not name:
+            continue
+        counts[name] = sum(1 for effect in row.iter() if str(effect.tag).endswith("Effect"))
+    return counts
+
+
+def _count_model_effects(root: ET.Element) -> tuple[int, int]:
+    counts = _model_effect_counts(root)
+    return sum(counts.values()), sum(1 for count in counts.values() if count > 0)
+
+
+def _required_general_model_count(model_count: int) -> int:
+    if model_count <= 0:
+        return 0
+    if model_count == 1:
+        return 1
+    ratio_target = int(math.ceil(model_count * GENERAL_MODEL_PARTICIPATION_RATIO))
+    return min(model_count, MAX_REQUIRED_GENERAL_MODELS, max(MIN_GENERAL_MODEL_PARTICIPATION, ratio_target))
+
+
+def _root_models_with_effects(root: ET.Element, root_models: list[str]) -> set[str]:
+    counts = _model_effect_counts(root)
+    return {name for name in root_models if int(counts.get(name, 0)) > 0}
 
 
 def _safe_effect(
@@ -277,24 +420,28 @@ def _safe_effect(
 
 
 def _materialize_general_effects(xsq, layout_path: Path) -> int:
-    current, models_with_effects = _count_model_effects(xsq.root)
+    current, _models_with_effects = _count_model_effects(xsq.root)
     root_models = [name for name in _layout_root_model_names(layout_path) if name != DRUMMER_MODEL]
-    if current > 0 and (models_with_effects >= 2 or len(root_models) < 2):
+    required = _required_general_model_count(len(root_models))
+    active = _root_models_with_effects(xsq.root, root_models)
+    if current > 0 and len(active) >= required:
         return 0
 
     events = _find_general_timing_events(xsq.root)
     if not events:
         return 0
-
-    models = root_models
-    if not models:
+    if not root_models:
         return 0
 
+    # Fill currently dark root models first; once minimum participation is met,
+    # round-robin through the whole layout so the fallback remains visually broad.
+    inactive = [name for name in root_models if name not in active]
+    target_order = inactive + [name for name in root_models if name in active]
     stride = max(1, len(events) // MAX_GENERAL_EFFECTS)
     selected = events[::stride][:MAX_GENERAL_EFFECTS]
     placed = 0
     for index, event in enumerate(selected):
-        target = models[index % len(models)]
+        target = target_order[index % len(target_order)]
         if _safe_effect(
             xsq,
             target=target,
@@ -393,6 +540,7 @@ def _materialize_drummer_effects(xsq, layout_path: Path) -> dict[str, object]:
 
 
 def inspect_xsq_contract(xsq_path: Path) -> dict[str, object]:
+    xsq_path = Path(xsq_path)
     root = ET.parse(xsq_path).getroot()
     display = xml_io.find_root_child(root, "DisplayElements")
     effects = xml_io.find_root_child(root, "ElementEffects")
@@ -414,7 +562,10 @@ def inspect_xsq_contract(xsq_path: Path) -> dict[str, object]:
 
     drummer_events = _drummer_timing_events(root)
     media_file = str(root.findtext("./head/mediaFile", default="") or "").strip()
-    media_exists = bool(media_file and Path(media_file).exists())
+    media_path = Path(media_file) if media_file else None
+    if media_path is not None and not media_path.is_absolute():
+        media_path = xsq_path.parent / media_path
+    media_exists = bool(media_path is not None and media_path.exists())
     sequence_duration = str(root.findtext("./head/sequenceDuration", default="") or "").strip()
 
     return {
@@ -425,6 +576,7 @@ def inspect_xsq_contract(xsq_path: Path) -> dict[str, object]:
         "drummer_model_effects": drummer_effects,
         "auto_drummer_timing_events": len(drummer_events),
         "media_file": media_file,
+        "media_resolved_path": str(media_path.resolve()) if media_path is not None else "",
         "media_exists": media_exists,
         "sequence_duration": sequence_duration,
     }
@@ -454,6 +606,9 @@ def _update_report(
         "networks_path": str(show["networks_path"]),
         "channel_count": int(dict(show["channels"]).get("channel_count", 0)),
         "channel_overlap_count": int(dict(show["channels"]).get("overlap_count", 0)),
+        "channel_assignments_preserved": bool(dict(show["channels"]).get("preserved_existing", False)),
+        "model_type_normalization": dict(show.get("model_type_normalization", {}) or {}),
+        "layout_preflight": dict(show.get("layout_preflight", {}) or {}),
     }
 
     drummer_payload = payload.setdefault("drummer", {})
@@ -529,8 +684,15 @@ def finalize_xsq_output(
         raise RuntimeError(f"Generated XSQ has no xLights model rows: {xsq_path}")
     if int(contract["model_effects"]) <= 0:
         raise RuntimeError(f"Generated XSQ is timing-only; no model effects were written: {xsq_path}")
-    if len(_layout_root_model_names(Path(show["layout_path"]))) > 2 and int(contract["models_with_effects"]) < 2:
-        raise RuntimeError(f"Generated XSQ did not place effects across multiple models: {xsq_path}")
+
+    general_root_models = [name for name in _layout_root_model_names(Path(show["layout_path"])) if name != DRUMMER_MODEL]
+    root_active = _root_models_with_effects(ET.parse(xsq_path).getroot(), general_root_models)
+    required_active = _required_general_model_count(len(general_root_models))
+    if len(root_active) < required_active:
+        raise RuntimeError(
+            "Generated XSQ did not place effects across enough root models: "
+            f"{len(root_active)}/{required_active} required ({len(general_root_models)} available): {xsq_path}"
+        )
     if not bool(contract["media_exists"]):
         raise RuntimeError(f"Generated XSQ media reference does not resolve: {contract['media_file']}")
     if int(drummer.get("timing_events", 0) or 0) > 0 and int(contract["drummer_model_effects"]) <= 0:
@@ -539,6 +701,7 @@ def finalize_xsq_output(
             f"{xsq_path}"
         )
 
+    participation_ratio = round(len(root_active) / len(general_root_models), 3) if general_root_models else 1.0
     summary = {
         **contract,
         "xsq_path": str(xsq_path),
@@ -548,7 +711,13 @@ def finalize_xsq_output(
         "networks_path": str(show["networks_path"]),
         "channel_count": int(dict(show["channels"]).get("channel_count", 0)),
         "channel_overlap_count": int(dict(show["channels"]).get("overlap_count", 0)),
+        "channel_assignments_preserved": bool(dict(show["channels"]).get("preserved_existing", False)),
+        "model_type_normalization": dict(show.get("model_type_normalization", {}) or {}),
+        "layout_preflight": dict(show.get("layout_preflight", {}) or {}),
         "general_effects_added": general_added,
+        "root_models_with_effects": len(root_active),
+        "root_model_participation_required": required_active,
+        "root_model_participation_ratio": participation_ratio,
         "drummer": {
             "timing_events": int(drummer.get("timing_events", 0) or 0),
             "placed_effects": int(drummer.get("placed_effects", 0) or 0),
@@ -557,8 +726,28 @@ def finalize_xsq_output(
     }
     manifest_path = xsq_path.with_name(f"{xsq_path.stem}{SHOW_MANIFEST_SUFFIX}")
     manifest_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    _update_report(xsq_path, contract=contract, drummer=drummer, show=show)
+    _update_report(
+        xsq_path,
+        contract={**contract, "root_model_participation_ratio": participation_ratio},
+        drummer=drummer,
+        show=show,
+    )
     return summary
+
+
+def _match_audio_for_output(output: Path, audios: list[Path]) -> Path | None:
+    stem = output.stem
+    matches = [
+        candidate
+        for candidate in audios
+        if stem == candidate.stem
+        or stem.startswith(candidate.stem + ",")
+        or stem.startswith(candidate.stem + "_")
+        or stem.startswith(candidate.stem + "-")
+    ]
+    if matches:
+        return max(matches, key=lambda candidate: len(candidate.stem))
+    return audios[0] if len(audios) == 1 else None
 
 
 def finalize_generated_outputs(
@@ -571,10 +760,7 @@ def finalize_generated_outputs(
     outputs = [Path(path) for path in xsq_outputs]
     summaries: list[dict[str, object]] = []
     for output in outputs:
-        audio = next(
-            (candidate for candidate in audios if output.name.startswith(candidate.stem)),
-            audios[0] if len(audios) == 1 else None,
-        )
+        audio = _match_audio_for_output(output, audios)
         if audio is None:
             raise RuntimeError(f"Cannot associate generated XSQ with requested audio: {output}")
         summaries.append(
