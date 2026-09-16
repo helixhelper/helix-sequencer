@@ -49,6 +49,7 @@ jobs:
             tests/test_effect_engine_duration.py \
             tests/test_effect_engine_runner.py \
             tests/test_effect_engine_beat_grid_failure.py \
+            tests/test_beta_packaging_policy.py \
             tests/test_beta_output_contract.py \
             tests/test_xsq_duration_guard.py \
             tests/test_outcome_preview_duration_contract.py \
