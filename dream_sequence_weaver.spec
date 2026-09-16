@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 root = Path(globals().get("SPECPATH", ".")).resolve()
@@ -63,9 +63,7 @@ hiddenimports = [
     "requests",
     "librosa",
     "numpy",
-    "mutagen",
 ]
-hiddenimports += collect_submodules("mutagen")
 
 a = Analysis(
     ["gui_launcher.py"],
