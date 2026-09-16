@@ -67,6 +67,7 @@ def test_media_duration_removes_stale_template_marks_and_clips_boundary(tmp_path
 
     assert summary["duration_ms"] == 1000
     assert summary["duration_source"] == "media"
+    assert summary["drummer_duplicate_effects_removed"] == 0
     assert summary["removed_effects"] == 2
     assert summary["removed_timing_effects"] == 1
     assert summary["removed_model_effects"] == 1
@@ -138,3 +139,49 @@ def test_duration_guard_refuses_to_turn_model_sequence_back_into_timing_only(tmp
     # Fail closed before rewriting the original XSQ into a timing-only artifact.
     root = ET.parse(xsq).getroot()
     assert len(root.findall('./ElementEffects/Element[@type="model"]//Effect')) == 1
+
+
+def test_duration_guard_dedupes_exact_drummer_recovery_intervals_only(tmp_path: Path) -> None:
+    audio = tmp_path / "drums.wav"
+    xsq = tmp_path / "drums,v27.3.xsq"
+    _write_silence(audio, 1500)
+    xsq.write_text(
+        (
+            "<xsequence><head>"
+            f"<mediaFile>{audio.name}</mediaFile>"
+            "<sequenceDuration>1.500</sequenceDuration>"
+            "</head><ElementEffects>"
+            '<Element type="model" name="HX_SNOWMAN_DRUMMER/HX_SNOWMAN_DRUMMER_HIT_KICK">'
+            '<EffectLayer name="legacy"><Effect name="On" startTime="100" endTime="220" /></EffectLayer>'
+            '<EffectLayer name="AUTO_Helix_Drummer_V3">'
+            '<Effect name="On" startTime="100" endTime="220" />'
+            '<Effect name="On" startTime="400" endTime="520" />'
+            "</EffectLayer></Element>"
+            '<Element type="model" name="TREE"><EffectLayer>'
+            '<Effect name="On" startTime="100" endTime="220" />'
+            '<Effect name="On" startTime="100" endTime="220" />'
+            "</EffectLayer></Element>"
+            "</ElementEffects></xsequence>"
+        ),
+        encoding="utf-8",
+    )
+
+    summary = normalize_xsq_duration(xsq)
+
+    assert summary["drummer_duplicate_effects_removed"] == 1
+    assert summary["drummer_model_effects_raw_before_dedupe"] == 3
+    assert summary["drummer_model_effects_after"] == 2
+    assert summary["model_effects_raw_before_dedupe"] == 5
+    assert summary["model_effects_after"] == 4
+
+    root = ET.parse(xsq).getroot()
+    drummer_effects = root.findall(
+        './ElementEffects/Element[@name="HX_SNOWMAN_DRUMMER/HX_SNOWMAN_DRUMMER_HIT_KICK"]//Effect'
+    )
+    tree_effects = root.findall('./ElementEffects/Element[@name="TREE"]//Effect')
+    assert [(e.attrib["startTime"], e.attrib["endTime"]) for e in drummer_effects] == [
+        ("100", "220"),
+        ("400", "520"),
+    ]
+    # Non-drummer layering is left intact even if intervals are identical.
+    assert len(tree_effects) == 2
