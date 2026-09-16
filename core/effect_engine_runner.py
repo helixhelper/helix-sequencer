@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import RLock
 from typing import Any, Iterable
 
 from core import effect_engine
+
+
+# The legacy engine exposes its logger as mutable module-global state. Supported
+# callers therefore cannot safely intercept FAILED lines concurrently: one run
+# could restore another run's logger or capture the wrong song's failure. Keep
+# the strict adapter serialized until effect_engine itself is decomposed into
+# per-run state.
+_ENGINE_RUN_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -77,25 +86,31 @@ def run_effect_engine(
     that legacy behavior behind a typed result/error contract so supported callers
     cannot mistake a partial batch for success. The engine's original logger is
     always restored, including when `main_for` raises directly.
+
+    Runs are serialized because the legacy logger is module-global mutable state.
+    That lock can disappear once the engine owns per-run logging/result state.
     """
 
     engine = effect_engine if engine_module is None else engine_module
-    failures: list[EffectEngineFailure] = []
-    original_log = engine.log
+    args = list(argv)
 
-    def capture_log(message: str) -> None:
-        text = str(message)
-        if text.lstrip().startswith("FAILED:"):
-            failures.append(_parse_failure(text.lstrip()))
-        original_log(message)
+    with _ENGINE_RUN_LOCK:
+        failures: list[EffectEngineFailure] = []
+        original_log = engine.log
 
-    engine.log = capture_log
-    try:
-        engine.main_for(version, list(argv))
-    finally:
-        engine.log = original_log
+        def capture_log(message: str) -> None:
+            text = str(message)
+            if text.lstrip().startswith("FAILED:"):
+                failures.append(_parse_failure(text.lstrip()))
+            original_log(message)
 
-    result = EffectEngineRunResult(version=version, failures=tuple(failures))
-    if failures:
-        raise EffectEngineRunError(result)
-    return result
+        engine.log = capture_log
+        try:
+            engine.main_for(version, args)
+        finally:
+            engine.log = original_log
+
+        result = EffectEngineRunResult(version=version, failures=tuple(failures))
+        if failures:
+            raise EffectEngineRunError(result)
+        return result
