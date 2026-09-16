@@ -131,21 +131,95 @@ def _maximum_allowed_duration(benchmark_duration_seconds: float) -> float:
     )
 
 
+def _positive_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _read_drummer_evidence(
+    output_dir: Path,
+    *,
+    stem: str,
+    report: dict[str, Any],
+    required: bool,
+) -> dict[str, Any]:
+    """Cross-check report and finalized-show evidence for Drummer V3 rendering."""
+
+    report_drummer = report.get("drummer", {})
+    if not isinstance(report_drummer, dict):
+        report_drummer = {}
+    review = report_drummer.get("review", {})
+    if not isinstance(review, dict):
+        review = {}
+
+    show_path = output_dir / f"{stem}.show.json"
+    show: dict[str, Any] = {}
+    if show_path.is_file():
+        try:
+            loaded = json.loads(show_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PreviewArtifactError(f"Cannot parse finalized show manifest {show_path}: {exc}") from exc
+        if isinstance(loaded, dict):
+            show = loaded
+    elif required:
+        raise PreviewArtifactError(f"Drummer proof requires finalized show manifest: {show_path}")
+
+    show_drummer = show.get("drummer", {}) if isinstance(show, dict) else {}
+    if not isinstance(show_drummer, dict):
+        show_drummer = {}
+
+    evidence = {
+        "required": bool(required),
+        "show_manifest": str(show_path),
+        "show_manifest_exists": show_path.is_file(),
+        "analyzed_cues": _positive_int(report_drummer.get("analyzed_cues")),
+        "placement_requests": _positive_int(report_drummer.get("placement_requests")),
+        "report_placed_effects": _positive_int(report_drummer.get("placed_effects")),
+        "report_timing_track_events": _positive_int(report_drummer.get("timing_track_events")),
+        "review_placed_cues": _positive_int(review.get("placed_cues")),
+        "review_unplaced_cues": _positive_int(review.get("unplaced_cues")),
+        "show_drummer_model_effects": _positive_int(show.get("drummer_model_effects")),
+        "show_auto_drummer_timing_events": _positive_int(show.get("auto_drummer_timing_events")),
+        "finalizer_timing_events": _positive_int(show_drummer.get("timing_events")),
+        "finalizer_placed_effects": _positive_int(show_drummer.get("placed_effects")),
+    }
+
+    if required:
+        checks = (
+            ("analyzed cues", evidence["analyzed_cues"]),
+            ("placement requests", evidence["placement_requests"]),
+            ("report placed effects", evidence["report_placed_effects"]),
+            ("report timing-track events", evidence["report_timing_track_events"]),
+            ("final XSQ drummer model effects", evidence["show_drummer_model_effects"]),
+            ("final XSQ AUTO Drummer timing events", evidence["show_auto_drummer_timing_events"]),
+        )
+        missing = [label for label, value in checks if _positive_int(value) <= 0]
+        if missing:
+            raise PreviewArtifactError(
+                "Drummer V3 preview proof is incomplete; zero/missing " + ", ".join(missing)
+            )
+    return evidence
+
+
 def build_manifest(
     output_dir: Path,
     *,
     benchmark_duration_seconds: float,
     event: str,
     commit: str,
+    require_drummer: bool = False,
 ) -> dict[str, Any]:
     profile = engine_profiles.active_profile()
     stem = "helix-outcome-preview"
-    mp4 = output_dir / f"{stem},{profile.version}.mp4"
-    xsq = output_dir / f"{stem},{profile.version}.xsq"
-    report_path = output_dir / f"{stem},{profile.version}.report.json"
+    artifact_stem = f"{stem},{profile.version}"
+    mp4 = output_dir / f"{artifact_stem}.mp4"
+    xsq = output_dir / f"{artifact_stem}.xsq"
+    report_path = output_dir / f"{artifact_stem}.report.json"
 
-    for required in (mp4, xsq, report_path):
-        _require_artifact(required)
+    for required_path in (mp4, xsq, report_path):
+        _require_artifact(required_path)
 
     video = _read_video_metadata(mp4)
     _validate_audio_stream(mp4)
@@ -184,6 +258,12 @@ def build_manifest(
     report = json.loads(report_path.read_text(encoding="utf-8"))
     quality = report.get("quality", {})
     top_show = quality.get("top_show_benchmark", {})
+    drummer = _read_drummer_evidence(
+        output_dir,
+        stem=artifact_stem,
+        report=report,
+        required=require_drummer,
+    )
 
     return {
         "schema": "helix.outcome_preview.v1",
@@ -203,6 +283,7 @@ def build_manifest(
         "quality_grade": quality.get("grade"),
         "top_show_score": top_show.get("score"),
         "top_show_grade": top_show.get("grade"),
+        "drummer": drummer,
         "preview_mp4": str(mp4),
         "preview_mp4_bytes": mp4.stat().st_size,
         "preview_mp4_sha256": sha256_file(mp4),
@@ -213,6 +294,14 @@ def build_manifest(
 
 
 def render_summary(manifest: dict[str, Any]) -> str:
+    drummer = manifest.get("drummer", {})
+    if not isinstance(drummer, dict):
+        drummer = {}
+    drummer_summary = (
+        f"{_positive_int(drummer.get('analyzed_cues'))} analyzed / "
+        f"{_positive_int(drummer.get('report_placed_effects'))} placed / "
+        f"{_positive_int(drummer.get('show_drummer_model_effects'))} final model effects"
+    )
     return "\n".join(
         [
             "# Helix outcome preview",
@@ -231,6 +320,7 @@ def render_summary(manifest: dict[str, Any]) -> str:
             f"| Rendered duration | {manifest['rendered_duration_seconds']:.2f}s |",
             f"| XSQ duration | {manifest['sequence_duration_seconds']:.2f}s |",
             f"| Latest effect | {manifest['max_effect_end_seconds']:.2f}s |",
+            f"| Drummer V3 | {drummer_summary} |",
             f"| Preview | `{Path(manifest['preview_mp4']).name}` |",
             f"| Quality | {manifest['quality_score']} ({manifest['quality_grade']}) |",
             (
@@ -254,6 +344,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME", "local"))
     parser.add_argument("--commit", default=os.environ.get("GITHUB_SHA", "local"))
     parser.add_argument("--summary-out", type=Path, default=Path("review_summary.md"))
+    parser.add_argument(
+        "--require-drummer",
+        action="store_true",
+        help="Fail unless the report and finalized XSQ prove Drummer V3 cues were rendered.",
+    )
     return parser
 
 
@@ -264,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         benchmark_duration_seconds=args.benchmark_duration,
         event=args.event,
         commit=args.commit,
+        require_drummer=args.require_drummer,
     )
     manifest_path = args.output_dir / "outcome-preview-manifest.json"
     manifest_path.write_text(
