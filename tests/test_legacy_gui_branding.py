@@ -13,6 +13,7 @@ from legacy_gui_branding import (
     SUPPORT_DONATE_URL,
     instructions_text,
     legal_text,
+    progress_stage_for_line,
 )
 
 
@@ -50,6 +51,16 @@ def test_legal_button_combines_bundled_project_notices(tmp_path: Path) -> None:
     for index, name in enumerate(LEGAL_FILENAMES, start=1):
         assert name in text
         assert f"legal section {index}" in text
+
+
+def test_progress_report_turns_engine_output_into_readable_stages() -> None:
+    assert progress_stage_for_line("Starting beta sequence build.") == "Starting sequence build"
+    assert progress_stage_for_line("BeatGrid analysis: 128 BPM") == "Analyzing audio and musical structure"
+    assert progress_stage_for_line("snare placement request accepted") == "Building the drummer performance"
+    assert progress_stage_for_line("polish variant score 91.4") == "Evaluating and polishing variants"
+    assert progress_stage_for_line("writing XSQ to show folder") == "Writing xLights show files"
+    assert progress_stage_for_line("Beta run complete.") == "Completed"
+    assert progress_stage_for_line("ERROR: output contract failed") == "Problem encountered"
 
 
 def test_current_beta_gui_installs_legacy_branding_panel() -> None:
