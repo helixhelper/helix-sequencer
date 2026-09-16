@@ -18,6 +18,7 @@ from core import engine_profiles
 MIN_ARTIFACT_BYTES = 1024
 MAX_DURATION_RATIO = 1.05
 MAX_DURATION_SLACK_SECONDS = 0.25
+REQUIRED_DRUM_TYPES = ("kick", "snare", "hihat", "tom", "cymbal")
 
 
 class PreviewArtifactError(RuntimeError):
@@ -138,12 +139,28 @@ def _positive_int(value: Any) -> int:
         return 0
 
 
+def _read_show_manifest(output_dir: Path, *, stem: str, required: bool) -> tuple[Path, dict[str, Any]]:
+    show_path = output_dir / f"{stem}.show.json"
+    if not show_path.is_file():
+        if required:
+            raise PreviewArtifactError(f"Preview proof requires finalized show manifest: {show_path}")
+        return show_path, {}
+    try:
+        loaded = json.loads(show_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PreviewArtifactError(f"Cannot parse finalized show manifest {show_path}: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise PreviewArtifactError(f"Finalized show manifest is not a JSON object: {show_path}")
+    return show_path, loaded
+
+
 def _read_drummer_evidence(
     output_dir: Path,
     *,
     stem: str,
     report: dict[str, Any],
     required: bool,
+    require_drum_classes: bool = False,
 ) -> dict[str, Any]:
     """Cross-check report and finalized-show evidence for Drummer V3 rendering."""
 
@@ -154,24 +171,25 @@ def _read_drummer_evidence(
     if not isinstance(review, dict):
         review = {}
 
-    show_path = output_dir / f"{stem}.show.json"
-    show: dict[str, Any] = {}
-    if show_path.is_file():
-        try:
-            loaded = json.loads(show_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise PreviewArtifactError(f"Cannot parse finalized show manifest {show_path}: {exc}") from exc
-        if isinstance(loaded, dict):
-            show = loaded
-    elif required:
-        raise PreviewArtifactError(f"Drummer proof requires finalized show manifest: {show_path}")
-
+    show_path, show = _read_show_manifest(
+        output_dir,
+        stem=stem,
+        required=required or require_drum_classes,
+    )
     show_drummer = show.get("drummer", {}) if isinstance(show, dict) else {}
     if not isinstance(show_drummer, dict):
         show_drummer = {}
+    placed_by_type = show_drummer.get("placed_by_type", {})
+    if not isinstance(placed_by_type, dict):
+        placed_by_type = {}
+    normalized_by_type = {
+        str(key).strip().lower(): _positive_int(value)
+        for key, value in placed_by_type.items()
+    }
 
     evidence = {
         "required": bool(required),
+        "require_drum_classes": bool(require_drum_classes),
         "show_manifest": str(show_path),
         "show_manifest_exists": show_path.is_file(),
         "analyzed_cues": _positive_int(report_drummer.get("analyzed_cues")),
@@ -184,6 +202,7 @@ def _read_drummer_evidence(
         "show_auto_drummer_timing_events": _positive_int(show.get("auto_drummer_timing_events")),
         "finalizer_timing_events": _positive_int(show_drummer.get("timing_events")),
         "finalizer_placed_effects": _positive_int(show_drummer.get("placed_effects")),
+        "placed_by_type": normalized_by_type,
     }
 
     if required:
@@ -200,6 +219,17 @@ def _read_drummer_evidence(
             raise PreviewArtifactError(
                 "Drummer V3 preview proof is incomplete; zero/missing " + ", ".join(missing)
             )
+
+    if require_drum_classes:
+        missing_types = [
+            drum_type
+            for drum_type in REQUIRED_DRUM_TYPES
+            if _positive_int(normalized_by_type.get(drum_type)) <= 0
+        ]
+        if missing_types:
+            raise PreviewArtifactError(
+                "Drummer V3 class coverage is incomplete; zero/missing " + ", ".join(missing_types)
+            )
     return evidence
 
 
@@ -210,6 +240,8 @@ def build_manifest(
     event: str,
     commit: str,
     require_drummer: bool = False,
+    require_drum_classes: bool = False,
+    require_native_choreography: bool = False,
 ) -> dict[str, Any]:
     profile = engine_profiles.active_profile()
     stem = "helix-outcome-preview"
@@ -263,7 +295,19 @@ def build_manifest(
         stem=artifact_stem,
         report=report,
         required=require_drummer,
+        require_drum_classes=require_drum_classes,
     )
+    show_path, show = _read_show_manifest(
+        output_dir,
+        stem=artifact_stem,
+        required=require_native_choreography,
+    )
+    general_recovery_effects = _positive_int(show.get("general_effects_added"))
+    if require_native_choreography and general_recovery_effects > 0:
+        raise PreviewArtifactError(
+            "Preview relied on beta recovery choreography instead of native engine model effects: "
+            f"general_effects_added={general_recovery_effects} ({show_path})"
+        )
 
     return {
         "schema": "helix.outcome_preview.v1",
@@ -283,6 +327,8 @@ def build_manifest(
         "quality_grade": quality.get("grade"),
         "top_show_score": top_show.get("score"),
         "top_show_grade": top_show.get("grade"),
+        "native_choreography_required": bool(require_native_choreography),
+        "general_recovery_effects": general_recovery_effects,
         "drummer": drummer,
         "preview_mp4": str(mp4),
         "preview_mp4_bytes": mp4.stat().st_size,
@@ -320,7 +366,9 @@ def render_summary(manifest: dict[str, Any]) -> str:
             f"| Rendered duration | {manifest['rendered_duration_seconds']:.2f}s |",
             f"| XSQ duration | {manifest['sequence_duration_seconds']:.2f}s |",
             f"| Latest effect | {manifest['max_effect_end_seconds']:.2f}s |",
+            f"| Native choreography recovery effects | {manifest['general_recovery_effects']} |",
             f"| Drummer V3 | {drummer_summary} |",
+            f"| Drummer classes | {drummer.get('placed_by_type', {})} |",
             f"| Preview | `{Path(manifest['preview_mp4']).name}` |",
             f"| Quality | {manifest['quality_score']} ({manifest['quality_grade']}) |",
             (
@@ -349,6 +397,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail unless the report and finalized XSQ prove Drummer V3 cues were rendered.",
     )
+    parser.add_argument(
+        "--require-drum-classes",
+        action="store_true",
+        help="Fail unless kick, snare, hihat, tom, and cymbal each have final placements.",
+    )
+    parser.add_argument(
+        "--require-native-choreography",
+        action="store_true",
+        help="Fail if the benchmark needed beta recovery effects to reach model participation.",
+    )
     return parser
 
 
@@ -360,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
         event=args.event,
         commit=args.commit,
         require_drummer=args.require_drummer,
+        require_drum_classes=args.require_drum_classes,
+        require_native_choreography=args.require_native_choreography,
     )
     manifest_path = args.output_dir / "outcome-preview-manifest.json"
     manifest_path.write_text(
