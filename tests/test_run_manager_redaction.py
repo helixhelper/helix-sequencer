@@ -91,11 +91,12 @@ def test_run_manager_redacts_cli_api_key_from_persisted_failures(tmp_path: Path)
 
 
 def test_run_manager_manifest_preserves_all_batch_audio_paths(tmp_path: Path) -> None:
+    output_root = tmp_path / "outputs"
     config = RunConfig.from_engine_args(
         "master",
         [
             "--output-dir",
-            str(tmp_path / "outputs"),
+            str(output_root),
             "--audio",
             "first.wav",
             "second.mp3",
@@ -113,5 +114,7 @@ def test_run_manager_manifest_preserves_all_batch_audio_paths(tmp_path: Path) ->
         "first.wav",
         "second.mp3",
         "third.flac",
+        "--output-dir",
+        str(output_root),
         "--no-learning-memory",
     ]
