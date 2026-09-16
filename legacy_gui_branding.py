@@ -72,7 +72,15 @@ def progress_stage_for_line(message: str) -> str | None:
         return None
     if any(token in text for token in ("traceback", "fatal", "error:", "failed", "exception")):
         return "Problem encountered"
-    if any(token in text for token in ("beta run complete", "completed successfully", "sequence complete")):
+    if any(
+        token in text
+        for token in (
+            "beta run complete",
+            "completed successfully",
+            "sequence complete",
+            "success: run completed",
+        )
+    ):
         return "Completed"
     if any(token in text for token in ("show folder", "mediafile", "writing xsq", "finaliz", "xlights_networks", "output_contract")):
         return "Writing xLights show files"
@@ -256,14 +264,20 @@ class ProgressReportWindow(tk.Toplevel):
     def append(self, message: str) -> None:
         text = str(message)
         stage = progress_stage_for_line(text)
+        current_status = self.status_var.get()
         if stage:
-            self.stage_var.set(stage)
-            if stage == "Completed":
-                self.status_var.set("COMPLETE")
-                self._running = False
-                self.progress.stop()
-            elif stage == "Problem encountered":
+            # Completion is terminal for normal informational lines. The engine emits
+            # assessment/quality summaries after SUCCESS, which must not make the GUI
+            # look as if it resumed an earlier stage.
+            if stage == "Problem encountered":
+                self.stage_var.set(stage)
                 self.status_var.set("ATTENTION")
+            elif current_status != "COMPLETE":
+                self.stage_var.set(stage)
+                if stage == "Completed":
+                    self.status_var.set("COMPLETE")
+                    self._running = False
+                    self.progress.stop()
 
         stamp = time.strftime("%H:%M:%S")
         self.log.configure(state=tk.NORMAL)
