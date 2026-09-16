@@ -60,6 +60,7 @@ def test_progress_report_turns_engine_output_into_readable_stages() -> None:
     assert progress_stage_for_line("polish variant score 91.4") == "Evaluating and polishing variants"
     assert progress_stage_for_line("writing XSQ to show folder") == "Writing xLights show files"
     assert progress_stage_for_line("Beta run complete.") == "Completed"
+    assert progress_stage_for_line("SUCCESS: Run completed. Manifest: C:/show/run_manifest.json") == "Completed"
     assert progress_stage_for_line("ERROR: output contract failed") == "Problem encountered"
 
 
