@@ -85,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libegl1
+          sudo apt-get install -y --no-install-recommends libegl1 xvfb xauth
 
       - name: Compile preview stack
         run: python -m compileall -q core ai xlights tools main.py gui_launcher.py
@@ -150,7 +150,7 @@ jobs:
           XSQ="$(find "$PREVIEW_DIR" -maxdepth 1 -type f -name 'helix-outcome-preview,*.xsq' | head -n 1)"
           test -n "$XSQ"
           mkdir -p "$PREVIEW_DIR/native-xlights"
-          "$XLIGHTS_APPIMAGE" --headless \
+          xvfb-run -a "$XLIGHTS_APPIMAGE" --headless \
             -s "$PREVIEW_DIR" \
             --outputdir "$PREVIEW_DIR/native-xlights" \
             "$XSQ"
