@@ -13,6 +13,7 @@ from core import self_improving_scoring
 from core.controller_parser import build_controller_plan, write_networks_for_xsq_outputs
 from core.run_config import RunConfig
 from core.snowman_band_beat_grid import snap_snowman_band_payload_to_grid
+from core.xsq_duration_guard import normalize_xsq_duration
 
 
 REPORT_GLOB = "*.report.json"
@@ -351,14 +352,19 @@ def _finalize_beta_outputs(
         audio_paths=requested_audio,
     )
     for summary in summaries:
+        xsq_path = Path(str(summary.get("xsq_path", "")))
+        duration_normalization = normalize_xsq_duration(xsq_path)
+        summary["duration_normalization"] = duration_normalization
         drummer = dict(summary.get("drummer", {}) or {})
         effect_engine.log(
             "Beta output contract: "
-            f"xsq={Path(str(summary.get('xsq_path', ''))).name} "
+            f"xsq={xsq_path.name} "
             f"models={summary.get('effect_model_rows', 0)} "
             f"effects={summary.get('model_effects', 0)} "
             f"drummer={drummer.get('placed_effects', 0)} "
-            f"media={summary.get('media_file', '')}"
+            f"media={summary.get('media_file', '')} "
+            f"duration_removed={duration_normalization.get('removed_effects', 0)} "
+            f"duration_clipped={duration_normalization.get('clipped_effects', 0)}"
         )
     return summaries
 
