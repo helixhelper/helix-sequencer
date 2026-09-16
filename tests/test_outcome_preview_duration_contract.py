@@ -24,19 +24,39 @@ def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
     )
 
 
-def _write_valid_bundle_files(tmp_path: Path, *, effect_end_ms: int = 30000) -> tuple[Path, Path, Path]:
+def _write_valid_bundle_files(
+    tmp_path: Path,
+    *,
+    effect_end_ms: int = 30000,
+    drummer: bool = False,
+) -> tuple[Path, Path, Path]:
     mp4, xsq, report = _paths(tmp_path)
     mp4.write_bytes(b"0" * 2048)
+    drummer_track = ""
+    drummer_row = ""
+    if drummer:
+        drummer_track = (
+            '<Element type="timing" name="AUTO Drummer v27.3"><EffectLayer>'
+            '<Effect label="kick:kick_hit" startTime="500" endTime="650" />'
+            "</EffectLayer></Element>"
+        )
+        drummer_row = (
+            '<Element type="model" name="HX_SNOWMAN_DRUMMER/HX_SNOWMAN_DRUMMER_HIT_KICK">'
+            '<EffectLayer><Effect name="On" startTime="500" endTime="650" /></EffectLayer>'
+            "</Element>"
+        )
     _write_large(
         xsq,
         (
             "<xsequence><head><sequenceDuration>30.000</sequenceDuration></head>"
             "<ElementEffects><Element type=\"model\" name=\"TREE\"><EffectLayer>"
             f'<Effect name="On" startTime="0" endTime="{effect_end_ms}" />'
-            "</EffectLayer></Element></ElementEffects></xsequence>"
+            "</EffectLayer></Element>"
+            f"{drummer_track}{drummer_row}"
+            "</ElementEffects></xsequence>"
         ),
     )
-    payload = {
+    payload: dict[str, object] = {
         "quality": {
             "score": 90.0,
             "grade": "A",
@@ -44,6 +64,31 @@ def _write_valid_bundle_files(tmp_path: Path, *, effect_end_ms: int = 30000) -> 
         },
         "padding": "x" * 1400,
     }
+    if drummer:
+        payload["drummer"] = {
+            "analyzed_cues": 1,
+            "placement_requests": 1,
+            "placed_effects": 1,
+            "timing_track_events": 1,
+            "review": {
+                "placed_cues": 1,
+                "unplaced_cues": 0,
+                "cue_placement_ratio": 1.0,
+            },
+        }
+        version = engine_profiles.active_profile().version
+        show = tmp_path / f"helix-outcome-preview,{version}.show.json"
+        show.write_text(
+            json.dumps(
+                {
+                    "drummer_model_effects": 1,
+                    "auto_drummer_timing_events": 1,
+                    "drummer": {"timing_events": 1, "placed_effects": 1},
+                    "padding": "x" * 1200,
+                }
+            ),
+            encoding="utf-8",
+        )
     report.write_text(json.dumps(payload), encoding="utf-8")
     return mp4, xsq, report
 
@@ -103,3 +148,56 @@ def test_manifest_accepts_bounded_preview_and_records_duration_evidence(
     assert manifest["max_effect_end_seconds"] == 30.0
     assert manifest["out_of_declared_range_effects"] == 0
     assert manifest["maximum_allowed_duration_seconds"] == pytest.approx(31.75)
+    assert manifest["drummer"]["required"] is False
+
+
+def test_manifest_rejects_required_drummer_preview_without_render_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_valid_bundle_files(tmp_path)
+    monkeypatch.setattr(
+        preview_manifest,
+        "_read_video_metadata",
+        lambda _path: {"duration": 30.0, "fps": 10.0},
+    )
+    monkeypatch.setattr(preview_manifest, "_validate_audio_stream", lambda _path: None)
+
+    with pytest.raises(preview_manifest.PreviewArtifactError, match="Drummer proof requires"):
+        preview_manifest.build_manifest(
+            tmp_path,
+            benchmark_duration_seconds=30.0,
+            event="test",
+            commit="deadbeef",
+            require_drummer=True,
+        )
+
+
+def test_manifest_accepts_required_drummer_preview_with_cross_checked_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_valid_bundle_files(tmp_path, drummer=True)
+    monkeypatch.setattr(
+        preview_manifest,
+        "_read_video_metadata",
+        lambda _path: {"duration": 30.0, "fps": 10.0},
+    )
+    monkeypatch.setattr(preview_manifest, "_validate_audio_stream", lambda _path: None)
+
+    manifest = preview_manifest.build_manifest(
+        tmp_path,
+        benchmark_duration_seconds=30.0,
+        event="test",
+        commit="deadbeef",
+        require_drummer=True,
+    )
+
+    drummer = manifest["drummer"]
+    assert drummer["required"] is True
+    assert drummer["analyzed_cues"] == 1
+    assert drummer["placement_requests"] == 1
+    assert drummer["report_placed_effects"] == 1
+    assert drummer["report_timing_track_events"] == 1
+    assert drummer["show_drummer_model_effects"] == 1
+    assert drummer["show_auto_drummer_timing_events"] == 1
