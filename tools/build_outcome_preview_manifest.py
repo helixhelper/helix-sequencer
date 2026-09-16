@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,8 @@ from core import engine_profiles
 
 
 MIN_ARTIFACT_BYTES = 1024
+MAX_DURATION_RATIO = 1.05
+MAX_DURATION_SLACK_SECONDS = 0.25
 
 
 class PreviewArtifactError(RuntimeError):
@@ -85,6 +88,49 @@ def _validate_audio_stream(path: Path) -> None:
         raise PreviewArtifactError(f"Preview audio validation failed for {path}: {detail}")
 
 
+def read_xsq_duration_contract(path: Path) -> dict[str, float]:
+    """Return declared duration and the latest effect boundary in an XSQ."""
+
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        raise PreviewArtifactError(f"Cannot parse preview XSQ {path}: {exc}") from exc
+
+    raw_duration = str(root.findtext("./head/sequenceDuration", default="") or "").strip()
+    try:
+        sequence_duration = float(raw_duration)
+    except (TypeError, ValueError) as exc:
+        raise PreviewArtifactError(
+            f"Preview XSQ has invalid sequenceDuration {raw_duration!r}: {path}"
+        ) from exc
+    if sequence_duration <= 0:
+        raise PreviewArtifactError(f"Preview XSQ has non-positive sequenceDuration: {path}")
+
+    max_effect_end_ms = 0.0
+    out_of_declared_range = 0
+    for effect in root.findall("./ElementEffects//Effect"):
+        try:
+            end_ms = float(effect.attrib.get("endTime", "0") or 0)
+        except (TypeError, ValueError):
+            continue
+        max_effect_end_ms = max(max_effect_end_ms, end_ms)
+        if end_ms > (sequence_duration * 1000.0) + 1.0:
+            out_of_declared_range += 1
+
+    return {
+        "sequence_duration_seconds": sequence_duration,
+        "max_effect_end_seconds": max_effect_end_ms / 1000.0,
+        "out_of_declared_range_effects": float(out_of_declared_range),
+    }
+
+
+def _maximum_allowed_duration(benchmark_duration_seconds: float) -> float:
+    return max(
+        1.0,
+        float(benchmark_duration_seconds) * MAX_DURATION_RATIO + MAX_DURATION_SLACK_SECONDS,
+    )
+
+
 def build_manifest(
     output_dir: Path,
     *,
@@ -105,11 +151,36 @@ def build_manifest(
     _validate_audio_stream(mp4)
     rendered_duration = video["duration"]
     minimum_duration = max(1.0, float(benchmark_duration_seconds) * 0.95)
+    maximum_duration = _maximum_allowed_duration(benchmark_duration_seconds)
     if rendered_duration is None or rendered_duration < minimum_duration:
         raise PreviewArtifactError(
             "Preview duration is shorter than the benchmark "
             f"({rendered_duration!r}s rendered; expected at least {minimum_duration:.2f}s)"
         )
+    if rendered_duration > maximum_duration:
+        raise PreviewArtifactError(
+            "Preview duration extends beyond the benchmark "
+            f"({rendered_duration:.2f}s rendered; expected at most {maximum_duration:.2f}s)"
+        )
+
+    xsq_duration = read_xsq_duration_contract(xsq)
+    if xsq_duration["sequence_duration_seconds"] > maximum_duration:
+        raise PreviewArtifactError(
+            "Preview XSQ declares a duration beyond the benchmark "
+            f"({xsq_duration['sequence_duration_seconds']:.2f}s; expected at most {maximum_duration:.2f}s)"
+        )
+    if xsq_duration["max_effect_end_seconds"] > maximum_duration:
+        raise PreviewArtifactError(
+            "Preview XSQ contains effects beyond the benchmark "
+            f"(latest effect ends at {xsq_duration['max_effect_end_seconds']:.2f}s; "
+            f"expected at most {maximum_duration:.2f}s)"
+        )
+    if int(xsq_duration["out_of_declared_range_effects"]) > 0:
+        raise PreviewArtifactError(
+            "Preview XSQ contains "
+            f"{int(xsq_duration['out_of_declared_range_effects'])} effect(s) beyond sequenceDuration"
+        )
+
     report = json.loads(report_path.read_text(encoding="utf-8"))
     quality = report.get("quality", {})
     top_show = quality.get("top_show_benchmark", {})
@@ -121,8 +192,12 @@ def build_manifest(
         "profile_id": engine_profiles.ACTIVE_PROFILE_ID,
         "profile_version": profile.version,
         "benchmark_duration_seconds": float(benchmark_duration_seconds),
+        "maximum_allowed_duration_seconds": maximum_duration,
         "rendered_duration_seconds": rendered_duration,
         "rendered_fps": video["fps"],
+        "sequence_duration_seconds": xsq_duration["sequence_duration_seconds"],
+        "max_effect_end_seconds": xsq_duration["max_effect_end_seconds"],
+        "out_of_declared_range_effects": int(xsq_duration["out_of_declared_range_effects"]),
         "audio_stream_validated": True,
         "quality_score": quality.get("score"),
         "quality_grade": quality.get("grade"),
@@ -153,6 +228,9 @@ def render_summary(manifest: dict[str, Any]) -> str:
                 "| Benchmark | Deterministic synthetic audio, "
                 f"{manifest['benchmark_duration_seconds']:.0f}s |"
             ),
+            f"| Rendered duration | {manifest['rendered_duration_seconds']:.2f}s |",
+            f"| XSQ duration | {manifest['sequence_duration_seconds']:.2f}s |",
+            f"| Latest effect | {manifest['max_effect_end_seconds']:.2f}s |",
             f"| Preview | `{Path(manifest['preview_mp4']).name}` |",
             f"| Quality | {manifest['quality_score']} ({manifest['quality_grade']}) |",
             (
