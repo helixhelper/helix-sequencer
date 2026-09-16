@@ -39,6 +39,12 @@ It is not legal advice.
    - Licenses: BSD / ISC / similar permissive licenses (package-specific)
    - Action: include package notices for distributed binaries.
 
+8. **Mutagen**
+   - Project: https://github.com/quodlibet/mutagen
+   - License: GPL-2.0-or-later
+   - Usage: source-install metadata/duration support for compressed audio; it is intentionally not declared in `requirements-beta.txt` for the packaged Windows beta.
+   - Action: if Mutagen is redistributed in any future binary/customer bundle, include its applicable GPL notice/source-availability obligations and review the distribution plan before release.
+
 ## Practical Distribution Tip
 
 When shipping the customer bundle, include:
