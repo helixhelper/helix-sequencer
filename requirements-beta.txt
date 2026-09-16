@@ -1,6 +1,6 @@
 # Runtime and packaging dependencies for the Windows beta.
-# Whisper/torch are intentionally omitted from the one-file beta; lyric sync
-# remains optional and the source install can provide that heavier stack.
+# Whisper/torch and Mutagen are intentionally omitted from the one-file beta;
+# lyric sync and compressed-audio metadata remain optional source-install features.
 numpy>=1.26
 scipy>=1.11
 librosa>=0.10.2
@@ -12,6 +12,5 @@ imageio-ffmpeg>=0.5
 Pillow>=10.2
 PyYAML>=6.0
 requests>=2.34.2
-mutagen>=1.47
 pyinstaller>=6.10
 pytest>=8.0
