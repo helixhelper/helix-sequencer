@@ -124,6 +124,8 @@ jobs:
             --output-dir "$PREVIEW_DIR" \
             --benchmark-duration "$PREVIEW_DURATION" \
             --require-drummer \
+            --require-drum-classes \
+            --require-native-choreography \
             --summary-out review_summary.md
 
       - name: Upload MP4 preview and sequence artifacts
@@ -176,7 +178,7 @@ jobs:
               `[Download the MP4 preview bundle](${process.env.ARTIFACT_URL})`,
               '',
               `Rendered the active \`master\` profile from \`${process.env.PREVIEW_SHA.slice(0, 12)}\` using the deterministic benchmark and the finished Drummer V3 layout.`,
-              'The preview gate now requires nonzero analyzed cues, placement requests, AUTO Drummer timing events, and final drummer model effects.',
+              'The preview gate now requires native engine choreography without general recovery materialization plus final kick, snare, hihat, tom, and cymbal placements.',
               'The Actions artifact is retained for 14 days.',
             ].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments, {
