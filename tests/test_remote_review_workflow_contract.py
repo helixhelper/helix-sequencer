@@ -67,6 +67,8 @@ def test_remote_review_workflow_uses_pinned_native_xlights_headless_render() -> 
     assert 'XLIGHTS_VERSION: "2026.17"' in text
     assert 'XLIGHTS_APPIMAGE_SHA256:' in text
     assert 'sha256sum -c -' in text
+    assert 'Install xLights headless runtime libraries' in text
+    assert 'libegl1' in text
     assert 'Native xLights headless acceptance render' in text
     assert '"$XLIGHTS_APPIMAGE" --headless' in text
     assert '--outputdir "$PREVIEW_DIR/native-xlights"' in text
