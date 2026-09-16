@@ -9,6 +9,7 @@ from typing import Any
 
 SHOW_MANIFEST_SUFFIX = ".show.json"
 REPORT_SUFFIX = ".report.json"
+DRUMMER_MODEL_PREFIX = "HX_SNOWMAN_DRUMMER"
 
 
 def _positive_duration_ms(value: str | None) -> int | None:
@@ -101,6 +102,35 @@ def _remaining_out_of_range(root: ET.Element, duration_ms: int) -> int:
     return count
 
 
+def _model_effect_counts(root: ET.Element) -> dict[str, int]:
+    effects_root = root.find("./ElementEffects")
+    model_effects = 0
+    drummer_effects = 0
+    models_with_effects = 0
+    if effects_root is None:
+        return {
+            "model_effects": 0,
+            "models_with_effects": 0,
+            "drummer_model_effects": 0,
+        }
+    for element in effects_root.findall("Element"):
+        kind = str(element.attrib.get("type", "") or "").strip().lower()
+        if kind != "model":
+            continue
+        count = len(element.findall(".//Effect"))
+        if count:
+            models_with_effects += 1
+        model_effects += count
+        name = str(element.attrib.get("name", "") or "").strip()
+        if name.startswith(DRUMMER_MODEL_PREFIX):
+            drummer_effects += count
+    return {
+        "model_effects": model_effects,
+        "models_with_effects": models_with_effects,
+        "drummer_model_effects": drummer_effects,
+    }
+
+
 def _update_json_metadata(path: Path, key: str, summary: dict[str, Any]) -> None:
     if not path.is_file():
         return
@@ -110,12 +140,20 @@ def _update_json_metadata(path: Path, key: str, summary: dict[str, Any]) -> None
         return
     if not isinstance(payload, dict):
         return
+
+    current_counts = {
+        "model_effects": int(summary.get("model_effects_after", 0) or 0),
+        "models_with_effects": int(summary.get("models_with_effects_after", 0) or 0),
+        "drummer_model_effects": int(summary.get("drummer_model_effects_after", 0) or 0),
+    }
     if key == "output_contract":
         nested = payload.setdefault("output_contract", {})
         if not isinstance(nested, dict):
             return
+        nested.update(current_counts)
         nested["duration_normalization"] = summary
     else:
+        payload.update(current_counts)
         payload["duration_normalization"] = summary
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -127,6 +165,10 @@ def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
     marks must not extend a generated sequence or diagnostic preview. The media
     duration is authoritative when it can be read; otherwise the finalized XSQ
     ``sequenceDuration`` is used.
+
+    If a sequence had model effects before normalization, trimming is not allowed
+    to silently turn it back into a timing-only sequence. That protects the beta
+    output contract even though duration cleanup happens after materialization.
     """
 
     xsq_path = Path(xsq_path)
@@ -134,6 +176,7 @@ def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
     root = tree.getroot()
     duration_ms, duration_source = _resolved_duration_ms(xsq_path, root)
     effects_root = root.find("./ElementEffects")
+    before_counts = _model_effect_counts(root)
 
     removed = 0
     clipped = 0
@@ -176,6 +219,13 @@ def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
             f"XSQ duration normalization left {remaining} effect(s) past {duration_ms} ms: {xsq_path}"
         )
 
+    after_counts = _model_effect_counts(root)
+    if before_counts["model_effects"] > 0 and after_counts["model_effects"] <= 0:
+        raise RuntimeError(
+            "XSQ duration normalization removed every model effect; refusing timing-only output: "
+            f"{xsq_path}"
+        )
+
     if removed or clipped:
         ET.indent(tree, space="  ")
         tree.write(xsq_path, encoding="utf-8", xml_declaration=True)
@@ -191,6 +241,10 @@ def normalize_xsq_duration(xsq_path: Path) -> dict[str, Any]:
         "clipped_model_effects": clipped_model,
         "tracks_touched": sorted(tracks_touched),
         "remaining_out_of_range_effects": remaining,
+        "model_effects_before": before_counts["model_effects"],
+        "model_effects_after": after_counts["model_effects"],
+        "models_with_effects_after": after_counts["models_with_effects"],
+        "drummer_model_effects_after": after_counts["drummer_model_effects"],
     }
 
     _update_json_metadata(
