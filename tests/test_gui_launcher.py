@@ -5,6 +5,7 @@ from pathlib import Path
 
 from gui_launcher import (
     BetaRunOptions,
+    HelixGui,
     QueueWriter,
     build_engine_argv,
     inspect_drummer_layout,
@@ -145,3 +146,8 @@ def test_queue_writer_emits_complete_and_partial_lines() -> None:
         ("log", "second"),
         ("log", "third"),
     ]
+
+
+def test_gui_class_does_not_shadow_tkinter_options_helper() -> None:
+    assert "_options" not in HelixGui.__dict__
+    assert "_run_options" in HelixGui.__dict__

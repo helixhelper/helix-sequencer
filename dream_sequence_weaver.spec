@@ -7,6 +7,9 @@ root = Path(globals().get("SPECPATH", ".")).resolve()
 
 datas = [
     (str(root / "SEQUENCER_INSTRUCTIONS.txt"), "."),
+    (str(root / "LICENSE"), "."),
+    (str(root / "NOTICE"), "."),
+    (str(root / "THIRD_PARTY_LICENSES.md"), "."),
     (str(root / "launch_sequencer_app.cmd"), "."),
     (str(root / "launch_sequencer_app.vbs"), "."),
     (str(root / "app_icon.ico"), "."),
@@ -38,9 +41,11 @@ hiddenimports = [
     "core.drummer_xlights",
     "core.effect_engine",
     "core.effect_engine_beat_grid",
+    "core.effect_engine_runner",
     "core.engine_profiles",
     "core.model_parser",
     "core.sequence_builder",
+    "core.xsq_duration_guard",
     "audio.drum_classification",
     "audio.drum_detection",
     "animation.drummer_motion",

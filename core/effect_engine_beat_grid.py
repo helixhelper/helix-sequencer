@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Iterable
 
 from core.beat_grid_runtime import parse_beat_grid_runtime_args
+from core import beta_output_contract
 from core import effect_engine
 from core import self_improving_scoring
 from core.controller_parser import build_controller_plan, write_networks_for_xsq_outputs
 from core.run_config import RunConfig
 from core.snowman_band_beat_grid import snap_snowman_band_payload_to_grid
+from core.xsq_duration_guard import normalize_xsq_duration
 
 
 REPORT_GLOB = "*.report.json"
@@ -187,7 +190,7 @@ def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
         if not root.exists():
             continue
         for path in root.rglob("*.xsq"):
-            if path.is_file() and _is_recent(path, since):
+            if path.is_file() and _is_recent(path, since=since):
                 outputs.append(path)
     return sorted(outputs, key=lambda path: str(path))
 
@@ -212,6 +215,37 @@ def _requested_audio_paths(argv: Iterable[str]) -> list[Path]:
                 requested.append(Path(value))
         idx += 1
     return requested
+
+
+def _reject_ambiguous_requested_audio(argv: Iterable[str]) -> None:
+    """Reject distinct inputs that collapse to the same stem-based output name.
+
+    Legacy Helix output filenames are derived from ``audio.stem``. Two different
+    source paths such as ``disc1/song.wav`` and ``disc2/song.mp3`` therefore
+    cannot be associated with generated XSQs deterministically, and on Windows
+    even case-only stem differences can collide. Fail before running the engine
+    rather than silently binding a sequence to the wrong media file.
+    """
+
+    by_stem: dict[str, dict[Path, Path]] = {}
+    for audio in _requested_audio_paths(argv):
+        key = audio.stem.casefold()
+        resolved = audio.resolve(strict=False)
+        by_stem.setdefault(key, {})[resolved] = audio
+
+    collisions = [list(paths.values()) for paths in by_stem.values() if len(paths) > 1]
+    if not collisions:
+        return
+
+    details = "; ".join(
+        ", ".join(str(path) for path in paths)
+        for paths in collisions
+    )
+    raise RuntimeError(
+        "Requested audio files have ambiguous stem-based output names. "
+        "Rename the files so each requested song has a unique filename stem: "
+        f"{details}"
+    )
 
 
 def _verify_requested_xsq_outputs(
@@ -245,27 +279,11 @@ def _verify_requested_xsq_outputs(
 
 
 def _run_effect_engine_with_failure_capture(version: str, argv: list[str]) -> None:
-    """Promote the legacy engine's swallowed per-song FAILED logs to an exception."""
+    """Run through the shared typed contract for legacy swallowed failures."""
 
-    failures: list[str] = []
-    original_log = effect_engine.log
+    from core.effect_engine_runner import run_effect_engine
 
-    def capture_log(message: str) -> None:
-        text = str(message)
-        if text.lstrip().startswith("FAILED:"):
-            failures.append(text.strip())
-        original_log(message)
-
-    effect_engine.log = capture_log
-    try:
-        effect_engine.main_for(version, argv)
-    finally:
-        effect_engine.log = original_log
-    if failures:
-        details = " | ".join(failures[:8])
-        if len(failures) > 8:
-            details += f" | ... and {len(failures) - 8} more"
-        raise RuntimeError(f"Effect engine reported generation failure(s): {details}")
+    run_effect_engine(version, argv, engine_module=effect_engine)
 
 
 def _postprocess_beat_grid_for_run(
@@ -340,12 +358,55 @@ def autosize_controller_sidecars(
     }
 
 
+def _layout_supports_output_contract(layout_path: Path | None) -> bool:
+    if layout_path is None or not layout_path.exists():
+        return False
+    try:
+        root = ET.parse(layout_path).getroot()
+    except (OSError, ET.ParseError):
+        return False
+    return root.find(".//models/model") is not None
+
+
+def _finalize_beta_outputs(
+    config: RunConfig,
+    cleaned_args: list[str],
+    changed_xsq: list[Path],
+) -> list[dict[str, object]]:
+    requested_audio = _requested_audio_paths(cleaned_args)
+    if not changed_xsq or not requested_audio or not _layout_supports_output_contract(config.layout_path):
+        return []
+    assert config.layout_path is not None
+    summaries = beta_output_contract.finalize_generated_outputs(
+        changed_xsq,
+        layout_path=config.layout_path,
+        audio_paths=requested_audio,
+    )
+    for summary in summaries:
+        xsq_path = Path(str(summary.get("xsq_path", "")))
+        duration_normalization = normalize_xsq_duration(xsq_path)
+        summary["duration_normalization"] = duration_normalization
+        drummer = dict(summary.get("drummer", {}) or {})
+        effect_engine.log(
+            "Beta output contract: "
+            f"xsq={xsq_path.name} "
+            f"models={summary.get('effect_model_rows', 0)} "
+            f"effects={summary.get('model_effects', 0)} "
+            f"drummer={drummer.get('placed_effects', 0)} "
+            f"media={summary.get('media_file', '')} "
+            f"duration_removed={duration_normalization.get('removed_effects', 0)} "
+            f"duration_clipped={duration_normalization.get('clipped_effects', 0)}"
+        )
+    return summaries
+
+
 def main_for(version: str, argv: list[str] | None = None) -> None:
     """Run effect_engine while consuming BeatGrid runtime flags."""
 
     started = time.time()
     options = parse_beat_grid_runtime_args(argv or [])
     cleaned_args = list(options.cleaned_args)
+    _reject_ambiguous_requested_audio(cleaned_args)
     try:
         config = RunConfig.from_engine_args("engine", cleaned_args)
     except Exception as exc:
@@ -356,12 +417,18 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     _run_effect_engine_with_failure_capture(version, cleaned_args)
     changed_xsq = _changed_xsq_outputs(roots, before_xsq)
     _verify_requested_xsq_outputs(version, cleaned_args, before=before_xsq)
-    controller_summary = autosize_controller_sidecars(
-        version,
-        cleaned_args,
-        since=started,
-        before=before_xsq,
-    )
+    finalized = _finalize_beta_outputs(config, cleaned_args, changed_xsq)
+
+    controller_summary = None
+    if not finalized:
+        controller_summary = autosize_controller_sidecars(
+            version,
+            cleaned_args,
+            since=started,
+            before=before_xsq,
+        )
+    elif config.autosize_controllers:
+        effect_engine.log("Controller autosize satisfied by finalized xLights show folder.")
     if controller_summary is not None:
         effect_engine.log(
             "Controller autosize: "

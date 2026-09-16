@@ -17,6 +17,54 @@ def test_requested_audio_paths_supports_batch_and_inline_forms() -> None:
     assert requested == [Path("one.wav"), Path("two.mp3"), Path("three.flac")]
 
 
+def test_main_for_rejects_distinct_audio_paths_with_same_output_stem_before_engine_runs(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    first_dir = tmp_path / "disc1"
+    second_dir = tmp_path / "disc2"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = first_dir / "same-song.wav"
+    second = second_dir / "same-song.mp3"
+    first.write_bytes(b"")
+    second.write_bytes(b"")
+    called = False
+
+    def fake_main_for(_version: str, _argv: list[str]) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", fake_main_for)
+
+    with pytest.raises(RuntimeError, match="ambiguous stem-based output names") as exc_info:
+        effect_engine_beat_grid.main_for(
+            "v27.3",
+            ["--audio", str(first), str(second), "--output-dir", str(tmp_path / "outputs")],
+        )
+
+    assert called is False
+    assert str(first) in str(exc_info.value)
+    assert str(second) in str(exc_info.value)
+
+
+def test_main_for_allows_same_audio_path_repeated_without_false_collision(tmp_path, monkeypatch) -> None:
+    audio = tmp_path / "song.wav"
+    audio.write_bytes(b"")
+    output_root = tmp_path / "outputs"
+
+    def fake_main_for(_version: str, _argv: list[str]) -> None:
+        output_root.mkdir(parents=True, exist_ok=True)
+        (output_root / "song,v27.3.xsq").write_text("<xsequence />", encoding="utf-8")
+
+    monkeypatch.setattr(effect_engine_beat_grid.effect_engine, "main_for", fake_main_for)
+
+    effect_engine_beat_grid.main_for(
+        "v27.3",
+        ["--audio", str(audio), str(audio), "--output-dir", str(output_root)],
+    )
+
+
 def test_main_for_raises_when_engine_returns_without_requested_output(tmp_path, monkeypatch) -> None:
     audio = tmp_path / "song.wav"
     audio.write_bytes(b"")

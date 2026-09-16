@@ -88,3 +88,33 @@ def test_run_manager_redacts_cli_api_key_from_persisted_failures(tmp_path: Path)
     assert REDACTED_VALUE in manifest["warnings"][0]
     assert REDACTED_VALUE in manifest["errors"][0]
     assert REDACTED_VALUE in manifest["error_summary"]
+
+
+def test_run_manager_manifest_preserves_all_batch_audio_paths(tmp_path: Path) -> None:
+    output_root = tmp_path / "outputs"
+    config = RunConfig.from_engine_args(
+        "master",
+        [
+            "--output-dir",
+            str(output_root),
+            "--audio",
+            "first.wav",
+            "second.mp3",
+            "third.flac",
+        ],
+    )
+    ctx = RunManager(config).start(require_existing=False)
+    manifest = json.loads(ctx.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["audio_path"] == "first.wav"
+    assert manifest["audio_paths"] == ["first.wav", "second.mp3", "third.flac"]
+    assert ctx.command == [
+        "main.py",
+        "--audio",
+        "first.wav",
+        "second.mp3",
+        "third.flac",
+        "--output-dir",
+        str(output_root),
+        "--no-learning-memory",
+    ]

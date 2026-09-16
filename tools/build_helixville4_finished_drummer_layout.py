@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.xlights_layout_compat import normalize_xlights_model_types
 from tools.build_helpers.helixia import build_helixia_layout
 from tools.build_helpers.helixville4_finished_band import add_finished_helixville4_band_models
 from tools.build_helpers.drummer_v3_layout import install_drummer_v3_layout_model
@@ -22,6 +23,10 @@ def build_finished_drummer_layout(output_dir: str | Path) -> dict[str, object]:
     layout_path = out_dir / "xlights_rgbeffects.xml"
     add_finished_helixville4_band_models(layout_path)
     drummer_v3 = install_drummer_v3_layout_model(layout_path)
+    # Older imported Helixville house assets can carry the generic xLights
+    # DisplayAs="Matrix" value. Current xLights rejects that type outright, so
+    # normalize known legacy aliases before this layout is exposed to the GUI.
+    layout_compat = normalize_xlights_model_types(layout_path)
     band_assets = write_band_assets(out_dir / "band_assets")
     payload["finished_band_export"] = {
         "schema": "helixville4.finished_band_export.v1",
@@ -33,17 +38,20 @@ def build_finished_drummer_layout(output_dir: str | Path) -> dict[str, object]:
         "drummer_visual_target": "fixtures/band_geometry/previews/HX_SNOWMAN_DRUMMER_V3_pose_sheet.png",
         "layout_path": str(layout_path),
         "remaining_members_state": "approved_v2_runtime_models",
+        "xlights_model_type_normalizations": layout_compat,
     }
     payload["band_assets"] = band_assets
     payload["xlights_layout"] = dict(payload.get("xlights_layout", {}))
     payload["xlights_layout"]["band_model_specs_enabled"] = True
     payload["xlights_layout"]["finished_drummer_enabled"] = True
     payload["xlights_layout"]["drummer_v3_enabled"] = True
+    payload["xlights_layout"]["model_type_normalizations"] = layout_compat
     (out_dir / "helixia_manifest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     (out_dir / "HELIXIA_LAYOUT_NOTES.txt").write_text(
         "Helixville4 beta band layout generated.\n"
         "HX_SNOWMAN_DRUMMER uses authored Drummer V3 geometry and pose composite submodels.\n"
-        "Singer, guitarist, and bassist use the approved V2 runtime models.\n",
+        "Singer, guitarist, and bassist use the approved V2 runtime models.\n"
+        "Legacy generic Matrix model types are normalized to xLights-compatible Horiz Matrix models.\n",
         encoding="utf-8",
     )
     return payload

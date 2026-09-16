@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
 from drummer_review_gui import DrummerReviewWindow
+from legacy_gui_branding import install_legacy_branding
 
 
 APP_TITLE = "Helix Sequence Weaver"
@@ -173,7 +174,9 @@ def latest_drummer_summary(output_dir: Path) -> dict[str, Any] | None:
         drummer = dict(payload.get("drummer", {}) or {})
         review = dict(drummer.get("review", {}) or {})
         quality = dict(payload.get("quality", {}) or {})
+        output_contract = dict(payload.get("output_contract", {}) or {})
         return {
+            "show_folder": str(output_contract.get("show_folder") or report_path.parent),
             "report_path": str(report_path),
             "fallback_mode": str(drummer.get("fallback_mode", "") or "unknown"),
             "analyzed_cues": int(drummer.get("analyzed_cues", 0) or 0),
@@ -287,6 +290,7 @@ class HelixGui(tk.Tk):
 
         self._configure_style()
         self._build_ui()
+        install_legacy_branding(self, _external_or_resource)
         self.after(80, self._drain_events)
         self.after(140, self._prepare_latest_layout_on_startup)
         self.after(260, self._load_last_review)
@@ -659,7 +663,7 @@ class HelixGui(tk.Tk):
         review.transient(self)
         review.focus_set()
 
-    def _options(self) -> BetaRunOptions:
+    def _run_options(self) -> BetaRunOptions:
         return BetaRunOptions(
             profile=self.profile_var.get().strip() or "master",
             template=Path(self.template_var.get().strip()),
@@ -705,7 +709,7 @@ class HelixGui(tk.Tk):
     def _run_sequence(self) -> None:
         if self._running:
             return
-        options = self._options()
+        options = self._run_options()
         if not self._validate_options(options):
             return
         argv = build_engine_argv(options)
@@ -791,7 +795,8 @@ class HelixGui(tk.Tk):
             self.progress.stop()
 
     def _open_output_folder(self) -> None:
-        folder = Path(self.output_var.get().strip() or DEFAULT_OUTPUT)
+        summary_folder = str((self._latest_summary or {}).get("show_folder", "") or "").strip()
+        folder = Path(summary_folder or self.output_var.get().strip() or DEFAULT_OUTPUT)
         folder.mkdir(parents=True, exist_ok=True)
         try:
             if sys.platform == "win32":

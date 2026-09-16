@@ -123,6 +123,7 @@ def _redact_runtime_text(text: str, sensitive_values: Sequence[str]) -> str:
 class RunConfig:
     profile: str = "master"
     audio_path: Path | None = None
+    audio_paths: tuple[Path, ...] = field(default_factory=tuple)
     template_path: Path | None = None
     layout_path: Path | None = None
     output_root: Path = field(default_factory=lambda: Path("outputs"))
@@ -144,12 +145,31 @@ class RunConfig:
         while idx < len(args):
             raw = args[idx]
             arg, inline_value = _split_flag_value(raw)
+
+            if arg in {"--audio", "--audio-path", "--audio_path"}:
+                if inline_value is not None:
+                    values = [inline_value] if inline_value else []
+                    idx += 1
+                else:
+                    values: list[str] = []
+                    cursor = idx + 1
+                    while cursor < len(args) and not args[cursor].startswith("--"):
+                        values.append(args[cursor])
+                        cursor += 1
+                    idx = cursor
+                if not values:
+                    extra.append(raw)
+                    continue
+                new_paths = tuple(Path(value) for value in values)
+                config.audio_paths = (*config.audio_paths, *new_paths)
+                if config.audio_path is None:
+                    config.audio_path = new_paths[0]
+                continue
+
             nxt = inline_value if inline_value is not None else (args[idx + 1] if idx + 1 < len(args) else None)
             consumed = 1 if inline_value is not None else 2
             if arg in {"--template", "--template-path", "--template_path"} and nxt is not None:
                 config.template_path = Path(nxt); idx += consumed
-            elif arg in {"--audio", "--audio-path", "--audio_path"} and nxt is not None:
-                config.audio_path = Path(nxt); idx += consumed
             elif arg in {"--layout-file", "--layout", "--layout-path", "--layout_path"} and nxt is not None:
                 config.layout_path = Path(nxt); idx += consumed
             elif arg in {"--output-dir", "--output-root", "--output_root"} and nxt is not None:
@@ -189,10 +209,18 @@ class RunConfig:
         config.extra_engine_args = tuple(extra)
         return config
 
+    def resolved_audio_paths(self) -> tuple[Path, ...]:
+        if self.audio_paths:
+            return self.audio_paths
+        if self.audio_path is not None:
+            return (self.audio_path,)
+        return ()
+
     def to_engine_args(self) -> list[str]:
         args: list[str] = []
         if self.template_path is not None: args.extend(["--template", str(self.template_path)])
-        if self.audio_path is not None: args.extend(["--audio", str(self.audio_path)])
+        audio_paths = self.resolved_audio_paths()
+        if audio_paths: args.extend(["--audio", *(str(path) for path in audio_paths)])
         if self.layout_path is not None: args.extend(["--layout-file", str(self.layout_path)])
         if self.output_root != Path("outputs"): args.extend(["--output-dir", str(self.output_root)])
         if self.variants != 1: args.extend(["--variants", str(self.variants)])
@@ -207,12 +235,19 @@ class RunConfig:
 
     def validate_inputs(self, require_existing: bool = True) -> list[str]:
         issues: list[str] = []
+        audio_paths = self.resolved_audio_paths()
         sources = [
-            ("audio", "audio_path", self.audio_path),
             ("template", "template_path", self.template_path),
             ("layout", "layout_path", self.layout_path),
         ]
         if require_existing:
+            if not audio_paths:
+                issues.append("audio_path is required (audio path is required)")
+            else:
+                for index, path in enumerate(audio_paths):
+                    field_name = "audio_path" if len(audio_paths) == 1 else f"audio_paths[{index}]"
+                    if not path.exists():
+                        issues.append(f"{field_name} does not exist (audio path does not exist): {path}")
             for label, field_name, path in sources:
                 if path is None:
                     issues.append(f"{field_name} is required ({label} path is required)")
@@ -223,7 +258,11 @@ class RunConfig:
         if self.variants < 1: issues.append("variants must be at least 1")
         if self.controller_padding < 0: issues.append("controller_padding must be non-negative")
         output = self.output_root.resolve()
-        for _label, field_name, path in sources:
+        overlap_sources = [
+            *(('audio', f'audio_paths[{index}]' if len(audio_paths) > 1 else 'audio_path', path) for index, path in enumerate(audio_paths)),
+            *sources,
+        ]
+        for _label, field_name, path in overlap_sources:
             if path is None: continue
             resolved = path.resolve()
             if output == resolved:
@@ -256,7 +295,7 @@ class RunManager:
     def __init__(self, config: RunConfig, command: list[str] | None = None):
         self.config = config
         self.started_at = _utc_now()
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         self.run_id = f"{stamp}-{_safe_slug(config.profile)}"
         self.run_dir = config.output_root / "beta" / self.run_id
         self.run_dir.mkdir(parents=True, exist_ok=False)
@@ -276,6 +315,7 @@ class RunManager:
 
     def _manifest(self, *, status: str, success: bool, finished_at: str | None, error_summary: str | None) -> dict[str, Any]:
         safe_summary = _redact_runtime_text(error_summary, self._sensitive_values) if error_summary is not None else None
+        audio_paths = self.config.resolved_audio_paths()
         return {
             "schema": "helix.run_manifest.v1",
             "app": "Helix Sequencer",
@@ -284,7 +324,8 @@ class RunManager:
             "started_at": self.started_at,
             "finished_at": finished_at,
             "status": status,
-            "audio_path": str(self.config.audio_path) if self.config.audio_path else None,
+            "audio_path": str(audio_paths[0]) if audio_paths else None,
+            "audio_paths": [str(path) for path in audio_paths],
             "template_path": str(self.config.template_path) if self.config.template_path else None,
             "layout_path": str(self.config.layout_path) if self.config.layout_path else None,
             "output_root": str(self.config.output_root),
