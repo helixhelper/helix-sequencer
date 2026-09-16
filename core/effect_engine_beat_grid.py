@@ -190,7 +190,7 @@ def _recent_xsq_outputs(roots: Iterable[Path], *, since: float) -> list[Path]:
         if not root.exists():
             continue
         for path in root.rglob("*.xsq"):
-            if path.is_file() and _is_recent(path, since):
+            if path.is_file() and _is_recent(path, since=since):
                 outputs.append(path)
     return sorted(outputs, key=lambda path: str(path))
 
@@ -215,6 +215,37 @@ def _requested_audio_paths(argv: Iterable[str]) -> list[Path]:
                 requested.append(Path(value))
         idx += 1
     return requested
+
+
+def _reject_ambiguous_requested_audio(argv: Iterable[str]) -> None:
+    """Reject distinct inputs that collapse to the same stem-based output name.
+
+    Legacy Helix output filenames are derived from ``audio.stem``. Two different
+    source paths such as ``disc1/song.wav`` and ``disc2/song.mp3`` therefore
+    cannot be associated with generated XSQs deterministically, and on Windows
+    even case-only stem differences can collide. Fail before running the engine
+    rather than silently binding a sequence to the wrong media file.
+    """
+
+    by_stem: dict[str, dict[Path, Path]] = {}
+    for audio in _requested_audio_paths(argv):
+        key = audio.stem.casefold()
+        resolved = audio.resolve(strict=False)
+        by_stem.setdefault(key, {})[resolved] = audio
+
+    collisions = [list(paths.values()) for paths in by_stem.values() if len(paths) > 1]
+    if not collisions:
+        return
+
+    details = "; ".join(
+        ", ".join(str(path) for path in paths)
+        for paths in collisions
+    )
+    raise RuntimeError(
+        "Requested audio files have ambiguous stem-based output names. "
+        "Rename the files so each requested song has a unique filename stem: "
+        f"{details}"
+    )
 
 
 def _verify_requested_xsq_outputs(
@@ -375,6 +406,7 @@ def main_for(version: str, argv: list[str] | None = None) -> None:
     started = time.time()
     options = parse_beat_grid_runtime_args(argv or [])
     cleaned_args = list(options.cleaned_args)
+    _reject_ambiguous_requested_audio(cleaned_args)
     try:
         config = RunConfig.from_engine_args("engine", cleaned_args)
     except Exception as exc:
