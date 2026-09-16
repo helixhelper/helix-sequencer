@@ -5,6 +5,8 @@ import wave
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
+
 from core.xsq_duration_guard import normalize_xsq_duration
 
 
@@ -58,8 +60,8 @@ def test_media_duration_removes_stale_template_marks_and_clips_boundary(tmp_path
     _write_xsq(xsq, audio.name)
     show_manifest = xsq.with_name(f"{xsq.stem}.show.json")
     report = xsq.with_name(f"{xsq.stem}.report.json")
-    show_manifest.write_text("{}", encoding="utf-8")
-    report.write_text('{"output_contract": {}}', encoding="utf-8")
+    show_manifest.write_text('{"model_effects": 999, "models_with_effects": 999}', encoding="utf-8")
+    report.write_text('{"output_contract": {"model_effects": 999}}', encoding="utf-8")
 
     summary = normalize_xsq_duration(xsq)
 
@@ -71,12 +73,18 @@ def test_media_duration_removes_stale_template_marks_and_clips_boundary(tmp_path
     assert summary["clipped_effects"] == 1
     assert summary["clipped_timing_effects"] == 1
     assert summary["remaining_out_of_range_effects"] == 0
+    assert summary["model_effects_before"] == 2
+    assert summary["model_effects_after"] == 1
+    assert summary["models_with_effects_after"] == 1
     assert all(start < 1000 and end <= 1000 for start, end in _all_effect_times(xsq))
 
     manifest_payload = json.loads(show_manifest.read_text(encoding="utf-8"))
     report_payload = json.loads(report.read_text(encoding="utf-8"))
     assert manifest_payload["duration_normalization"]["removed_effects"] == 2
+    assert manifest_payload["model_effects"] == 1
+    assert manifest_payload["models_with_effects"] == 1
     assert report_payload["output_contract"]["duration_normalization"]["clipped_effects"] == 1
+    assert report_payload["output_contract"]["model_effects"] == 1
 
 
 def test_sequence_duration_is_fallback_when_media_duration_is_unavailable(tmp_path: Path) -> None:
@@ -98,4 +106,35 @@ def test_sequence_duration_is_fallback_when_media_duration_is_unavailable(tmp_pa
     assert summary["duration_source"] == "sequenceDuration"
     assert summary["removed_effects"] == 1
     assert summary["clipped_effects"] == 1
+    assert summary["model_effects_before"] == 0
+    assert summary["model_effects_after"] == 0
     assert _all_effect_times(xsq) == [(1900, 2000)]
+
+
+def test_duration_guard_refuses_to_turn_model_sequence_back_into_timing_only(tmp_path: Path) -> None:
+    audio = tmp_path / "short.wav"
+    xsq = tmp_path / "short,v27.3.xsq"
+    _write_silence(audio, 500)
+    xsq.write_text(
+        (
+            "<xsequence><head>"
+            f"<mediaFile>{audio.name}</mediaFile>"
+            "<sequenceDuration>0.500</sequenceDuration>"
+            "</head><ElementEffects>"
+            '<Element type="timing" name="AUTO"><EffectLayer>'
+            '<Effect label="beat" startTime="100" endTime="200" />'
+            "</EffectLayer></Element>"
+            '<Element type="model" name="TREE"><EffectLayer>'
+            '<Effect name="stale" startTime="700" endTime="900" />'
+            "</EffectLayer></Element>"
+            "</ElementEffects></xsequence>"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="removed every model effect"):
+        normalize_xsq_duration(xsq)
+
+    # Fail closed before rewriting the original XSQ into a timing-only artifact.
+    root = ET.parse(xsq).getroot()
+    assert len(root.findall('./ElementEffects/Element[@type="model"]//Effect')) == 1
