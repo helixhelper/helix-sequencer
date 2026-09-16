@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+from core.beta_output_contract import normalize_preview_channels
 from core.xlights_layout_compat import normalize_xlights_model_types, preflight_xlights_layout
 
 
@@ -203,3 +205,25 @@ def test_preflight_reports_numeric_channel_overlap(tmp_path: Path) -> None:
     assert report["ok"] is False
     assert report["channel_overlap_count"] == 1
     assert any("channel overlaps" in error for error in report["errors"])
+
+
+def test_real_helixville4_layout_survives_beta_compatibility_pipeline(tmp_path: Path) -> None:
+    source = Path(__file__).resolve().parents[1] / "helixville4" / "xlights_rgbeffects.xml"
+    layout = tmp_path / "xlights_rgbeffects.xml"
+    shutil.copy2(source, layout)
+
+    normalization = normalize_xlights_model_types(layout)
+    channels = normalize_preview_channels(layout)
+    report = preflight_xlights_layout(layout)
+
+    assert normalization["matrix_aliases"] > 0
+    assert normalization["matrix_horizontal"] == normalization["matrix_aliases"]
+    assert normalization["matrix_vertical"] == 0
+    assert channels["overlap_count"] == 0
+    assert channels["rewritten"] is True
+    assert report["ok"] is True
+    assert report["models"] >= 100
+    assert report["groups"] > 0
+    assert report["generic_model_types"] == []
+    assert report["unresolved_group_refs"] == []
+    assert report["channel_overlap_count"] == 0
