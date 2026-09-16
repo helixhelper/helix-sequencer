@@ -54,6 +54,9 @@ env:
   PREVIEW_AUDIO_DIR: test_runs/outcome_preview_input
   PREVIEW_LAYOUT_DIR: test_runs/outcome_preview_layout
   PREVIEW_DIR: test_runs/outcome_preview
+  XLIGHTS_VERSION: "2026.17"
+  XLIGHTS_APPIMAGE: /tmp/xLights-2026.17-x86_64.AppImage
+  XLIGHTS_APPIMAGE_SHA256: 90a981be5409dd0e895d08de91edd6060e113f80cec7be5ffc67e545c97a58f6
 
 jobs:
   render-winner-preview:
@@ -115,6 +118,38 @@ jobs:
             --contact-sheet-samples 8 \
             --contact-sheet-mode both
 
+      - name: Cache pinned xLights AppImage
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.XLIGHTS_APPIMAGE }}
+          key: xlights-appimage-${{ env.XLIGHTS_VERSION }}-${{ env.XLIGHTS_APPIMAGE_SHA256 }}
+
+      - name: Download pinned xLights headless renderer
+        run: |
+          set -euo pipefail
+          if [ ! -s "$XLIGHTS_APPIMAGE" ]; then
+            curl --fail --location --retry 3 --retry-delay 2 \
+              "https://github.com/xLightsSequencer/xLights/releases/download/${XLIGHTS_VERSION}/xLights-${XLIGHTS_VERSION}-x86_64.AppImage" \
+              --output "$XLIGHTS_APPIMAGE"
+          fi
+          echo "$XLIGHTS_APPIMAGE_SHA256  $XLIGHTS_APPIMAGE" | sha256sum -c -
+          chmod +x "$XLIGHTS_APPIMAGE"
+
+      - name: Native xLights headless acceptance render
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          XL_HEADLESS_NO_GL: "1"
+        run: |
+          set -euo pipefail
+          XSQ="$(find "$PREVIEW_DIR" -maxdepth 1 -type f -name 'helix-outcome-preview,*.xsq' | head -n 1)"
+          test -n "$XSQ"
+          mkdir -p "$PREVIEW_DIR/native-xlights"
+          "$XLIGHTS_APPIMAGE" --headless \
+            -s "$PREVIEW_DIR" \
+            --outputdir "$PREVIEW_DIR/native-xlights" \
+            "$XSQ"
+          find "$PREVIEW_DIR/native-xlights" -maxdepth 1 -type f -name '*.fseq' -size +0c -print -quit | grep -q .
+
       - name: Validate preview and build manifest
         env:
           PREVIEW_DURATION: ${{ inputs.duration_seconds || '30' }}
@@ -137,6 +172,7 @@ jobs:
             review_summary.md
             test_runs/outcome_preview/**/*.mp4
             test_runs/outcome_preview/**/*.xsq
+            test_runs/outcome_preview/**/*.fseq
             test_runs/outcome_preview/**/*.json
             test_runs/outcome_preview/**/*.txt
             test_runs/outcome_preview/**/*.jpg
@@ -178,7 +214,8 @@ jobs:
               `[Download the MP4 preview bundle](${process.env.ARTIFACT_URL})`,
               '',
               `Rendered the active \`master\` profile from \`${process.env.PREVIEW_SHA.slice(0, 12)}\` using the deterministic benchmark and the finished Drummer V3 layout.`,
-              'The preview gate now requires native engine choreography without general recovery materialization plus final kick, snare, hihat, tom, and cymbal placements.',
+              `Native xLights ${process.env.XLIGHTS_VERSION || 'pinned'} headless rendering accepted the generated show folder.`,
+              'The preview gate requires native engine choreography without general recovery materialization plus final kick, snare, hihat, tom, and cymbal placements.',
               'The Actions artifact is retained for 14 days.',
             ].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments, {
