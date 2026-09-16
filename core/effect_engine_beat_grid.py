@@ -247,27 +247,11 @@ def _verify_requested_xsq_outputs(
 
 
 def _run_effect_engine_with_failure_capture(version: str, argv: list[str]) -> None:
-    """Promote the legacy engine's swallowed per-song FAILED logs to an exception."""
+    """Run through the shared typed contract for legacy swallowed failures."""
 
-    failures: list[str] = []
-    original_log = effect_engine.log
+    from core.effect_engine_runner import run_effect_engine
 
-    def capture_log(message: str) -> None:
-        text = str(message)
-        if text.lstrip().startswith("FAILED:"):
-            failures.append(text.strip())
-        original_log(message)
-
-    effect_engine.log = capture_log
-    try:
-        effect_engine.main_for(version, argv)
-    finally:
-        effect_engine.log = original_log
-    if failures:
-        details = " | ".join(failures[:8])
-        if len(failures) > 8:
-            details += f" | ... and {len(failures) - 8} more"
-        raise RuntimeError(f"Effect engine reported generation failure(s): {details}")
+    run_effect_engine(version, argv, engine_module=effect_engine)
 
 
 def _postprocess_beat_grid_for_run(
