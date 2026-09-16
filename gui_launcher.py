@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
 from drummer_review_gui import DrummerReviewWindow
+from legacy_gui_branding import install_legacy_branding
 
 
 APP_TITLE = "Helix Sequence Weaver"
@@ -289,6 +290,7 @@ class HelixGui(tk.Tk):
 
         self._configure_style()
         self._build_ui()
+        install_legacy_branding(self, _external_or_resource)
         self.after(80, self._drain_events)
         self.after(140, self._prepare_latest_layout_on_startup)
         self.after(260, self._load_last_review)
