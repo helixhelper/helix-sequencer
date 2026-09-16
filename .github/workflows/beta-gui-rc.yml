@@ -42,7 +42,7 @@ jobs:
 
       - name: Run focused GUI and drummer tests
         run: |
-          python -m pytest -q tests/test_gui_launcher.py tests/test_legacy_gui_branding.py tests/test_beta_output_contract.py tests/test_xlights_layout_compat.py tests/test_xlights_layout_doctor.py tests/test_drum_detection.py tests/test_drummer_xlights.py tests/test_drummer_v3_layout.py tests/test_snowman_drummer_integration.py tests/test_drummer_v3_pose_sheet.py tests/test_drum_mapping.py tests/test_working_drummer.py tests/test_finished_helixville4_drummer.py tests/test_effect_engine_runner.py tests/test_effect_engine_beat_grid_failure.py
+          python -m pytest -q tests/test_gui_launcher.py tests/test_legacy_gui_branding.py tests/test_beta_output_contract.py tests/test_xlights_layout_compat.py tests/test_xlights_layout_doctor.py tests/test_drum_detection.py tests/test_drummer_xlights.py tests/test_drummer_v3_layout.py tests/test_snowman_drummer_integration.py tests/test_drummer_v3_pose_sheet.py tests/test_drum_mapping.py tests/test_working_drummer.py tests/test_finished_helixville4_drummer.py tests/test_effect_engine_runner.py tests/test_effect_engine_beat_grid_failure.py tests/test_xsq_duration_guard.py
 
       - name: Validate source GUI resources
         run: python gui_launcher.py --self-check
