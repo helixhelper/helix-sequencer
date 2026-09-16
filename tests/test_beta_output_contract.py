@@ -112,9 +112,13 @@ def test_finalize_xsq_builds_coherent_xlights_show_folder(tmp_path: Path) -> Non
     assert summary["drummer_model_effects"] >= 5
     assert summary["auto_drummer_timing_events"] == 5
     assert summary["media_exists"] is True
-    assert Path(str(summary["media_file"])).resolve() == (output.parent / audio.name).resolve()
+    assert summary["media_file"] == audio.name
+    assert Path(str(summary["media_resolved_path"])).resolve() == (output.parent / audio.name).resolve()
     assert summary["sequence_duration"] == "1.000"
     assert summary["channel_overlap_count"] == 0
+    assert summary["channel_assignments_preserved"] is False
+    assert dict(summary["layout_preflight"])["ok"] is True
+    assert summary["root_models_with_effects"] >= summary["root_model_participation_required"]
 
     placed = dict(summary["drummer"])["placed_by_type"]
     assert placed["kick"] >= 1
@@ -131,7 +135,8 @@ def test_finalize_xsq_builds_coherent_xlights_show_folder(tmp_path: Path) -> Non
     root = ET.parse(output).getroot()
     media = str(root.findtext("./head/mediaFile", default="") or "")
     assert "template-audio.mp3" not in media
-    assert Path(media).exists()
+    assert media == audio.name
+    assert (output.parent / media).exists()
 
     rows = {
         row.attrib.get("name", ""): row
@@ -158,6 +163,8 @@ def test_preview_layout_channels_are_sequential_and_remove_placeholders(tmp_path
 
     assert summary["models"] == 3
     assert summary["overlap_count"] == 0
+    assert summary["rewritten"] is True
+    assert summary["preserved_existing"] is False
     starts = [
         int(model.attrib["StartChannel"])
         for model in ET.parse(layout).getroot().findall("./models/model")
@@ -165,6 +172,68 @@ def test_preview_layout_channels_are_sequential_and_remove_placeholders(tmp_path
     assert starts[0] == 1
     assert starts == sorted(starts)
     assert all(start < 900000 for start in starts)
+
+
+def test_preview_channel_spans_respect_single_color_models(tmp_path: Path) -> None:
+    layout = tmp_path / "xlights_rgbeffects.xml"
+    layout.write_text(
+        (
+            "<xrgb><models>"
+            '<model name="MONO" DisplayAs="Single Line" parm1="10" parm2="1" StringType="Single Color Red" StartChannel="900000" />'
+            '<model name="RGB" DisplayAs="Single Line" parm1="4" parm2="1" StringType="RGB Nodes" StartChannel="902000" />'
+            "</models><modelGroups/></xrgb>"
+        ),
+        encoding="utf-8",
+    )
+
+    summary = beta_output_contract.normalize_preview_channels(layout)
+    allocations = {item["model"]: item for item in summary["allocations"]}
+
+    assert allocations["MONO"]["channels"] == 10
+    assert allocations["RGB"]["channels"] == 12
+    assert allocations["RGB"]["start_channel"] == 11
+
+
+def test_preview_channels_preserve_compact_valid_assignments(tmp_path: Path) -> None:
+    layout = tmp_path / "xlights_rgbeffects.xml"
+    layout.write_text(
+        (
+            "<xrgb><models>"
+            '<model name="A" DisplayAs="Single Line" parm1="4" parm2="1" StringType="RGB Nodes" StartChannel="1" />'
+            '<model name="B" DisplayAs="Single Line" parm1="4" parm2="1" StringType="RGB Nodes" StartChannel="20" />'
+            "</models><modelGroups/></xrgb>"
+        ),
+        encoding="utf-8",
+    )
+
+    summary = beta_output_contract.normalize_preview_channels(layout)
+
+    assert summary["preserved_existing"] is True
+    assert summary["rewritten"] is False
+    starts = [int(model.attrib["StartChannel"]) for model in ET.parse(layout).getroot().findall("./models/model")]
+    assert starts == [1, 20]
+
+
+def test_relative_media_reference_survives_moving_show_folder(tmp_path: Path) -> None:
+    layout = tmp_path / "layout.xml"
+    audio = tmp_path / "song.wav"
+    show = tmp_path / "show"
+    output = show / "song,v27.3.xsq"
+    show.mkdir()
+    _write_layout(layout)
+    _write_silence(audio)
+    _write_timing_only_xsq(output)
+
+    beta_output_contract.finalize_xsq_output(output, layout_path=layout, audio_path=audio)
+    moved = tmp_path / "moved-show"
+    show.rename(moved)
+    moved_output = moved / output.name
+
+    contract = beta_output_contract.inspect_xsq_contract(moved_output)
+
+    assert contract["media_file"] == audio.name
+    assert contract["media_exists"] is True
+    assert Path(str(contract["media_resolved_path"])).resolve() == (moved / audio.name).resolve()
 
 
 def test_show_manifest_records_the_verified_contract(tmp_path: Path) -> None:
@@ -182,4 +251,7 @@ def test_show_manifest_records_the_verified_contract(tmp_path: Path) -> None:
     assert manifest["model_effects"] > 0
     assert manifest["drummer_model_effects"] > 0
     assert manifest["media_exists"] is True
+    assert manifest["media_file"] == audio.name
     assert manifest["channel_overlap_count"] == 0
+    assert manifest["layout_preflight"]["ok"] is True
+    assert manifest["root_models_with_effects"] >= manifest["root_model_participation_required"]
