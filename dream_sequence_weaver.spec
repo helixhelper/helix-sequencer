@@ -7,6 +7,9 @@ root = Path(globals().get("SPECPATH", ".")).resolve()
 
 datas = [
     (str(root / "SEQUENCER_INSTRUCTIONS.txt"), "."),
+    (str(root / "LICENSE"), "."),
+    (str(root / "NOTICE"), "."),
+    (str(root / "THIRD_PARTY_LICENSES.md"), "."),
     (str(root / "launch_sequencer_app.cmd"), "."),
     (str(root / "launch_sequencer_app.vbs"), "."),
     (str(root / "app_icon.ico"), "."),
