@@ -52,6 +52,7 @@ concurrency:
 env:
   PYTHONPATH: .
   PREVIEW_AUDIO_DIR: test_runs/outcome_preview_input
+  PREVIEW_LAYOUT_DIR: test_runs/outcome_preview_layout
   PREVIEW_DIR: test_runs/outcome_preview
 
 jobs:
@@ -85,10 +86,17 @@ jobs:
           PREVIEW_DURATION: ${{ inputs.duration_seconds || '30' }}
         run: |
           set -euo pipefail
-          mkdir -p "$PREVIEW_AUDIO_DIR" "$PREVIEW_DIR"
+          mkdir -p "$PREVIEW_AUDIO_DIR" "$PREVIEW_LAYOUT_DIR" "$PREVIEW_DIR"
           python tools/generate_structured_benchmark_audio.py \
             "$PREVIEW_AUDIO_DIR/helix-outcome-preview.wav" \
             --duration "$PREVIEW_DURATION"
+
+      - name: Build Drummer V3 review layout
+        run: |
+          set -euo pipefail
+          python tools/build_helixville4_finished_drummer_layout.py \
+            --output-dir "$PREVIEW_LAYOUT_DIR"
+          test -s "$PREVIEW_LAYOUT_DIR/xlights_rgbeffects.xml"
 
       - name: Build and render the active Helix outcome
         env:
@@ -98,7 +106,7 @@ jobs:
           python -m tools.helixia_smoke_preview \
             --profile master \
             --audio "$PREVIEW_AUDIO_DIR/helix-outcome-preview.wav" \
-            --layout xlights_rgbeffects.xml \
+            --layout "$PREVIEW_LAYOUT_DIR/xlights_rgbeffects.xml" \
             --template template.xsq \
             --output-dir "$PREVIEW_DIR" \
             --fps "$PREVIEW_FPS" \
@@ -115,6 +123,7 @@ jobs:
           python -m tools.build_outcome_preview_manifest \
             --output-dir "$PREVIEW_DIR" \
             --benchmark-duration "$PREVIEW_DURATION" \
+            --require-drummer \
             --summary-out review_summary.md
 
       - name: Upload MP4 preview and sequence artifacts
@@ -129,6 +138,10 @@ jobs:
             test_runs/outcome_preview/**/*.json
             test_runs/outcome_preview/**/*.txt
             test_runs/outcome_preview/**/*.jpg
+            test_runs/outcome_preview/xlights_rgbeffects.xml
+            test_runs/outcome_preview/xlights_networks.xml
+            test_runs/outcome_preview_layout/helixia_manifest.json
+            test_runs/outcome_preview_layout/HELIXIA_LAYOUT_NOTES.txt
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
@@ -162,7 +175,8 @@ jobs:
               '',
               `[Download the MP4 preview bundle](${process.env.ARTIFACT_URL})`,
               '',
-              `Rendered the active \`master\` profile from \`${process.env.PREVIEW_SHA.slice(0, 12)}\` using the deterministic benchmark.`,
+              `Rendered the active \`master\` profile from \`${process.env.PREVIEW_SHA.slice(0, 12)}\` using the deterministic benchmark and the finished Drummer V3 layout.`,
+              'The preview gate now requires nonzero analyzed cues, placement requests, AUTO Drummer timing events, and final drummer model effects.',
               'The Actions artifact is retained for 14 days.',
             ].join('\n');
             const comments = await github.paginate(github.rest.issues.listComments, {
