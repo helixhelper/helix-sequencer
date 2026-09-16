@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import webbrowser
 from pathlib import Path
 import tkinter as tk
@@ -61,6 +62,33 @@ def legal_text(resolve: PathResolver) -> str:
     if sections:
         return "\n\n\n".join(sections)
     return "No bundled legal/license notices were found in this build."
+
+
+def progress_stage_for_line(message: str) -> str | None:
+    """Translate noisy engine output into a useful human-readable progress stage."""
+
+    text = str(message or "").strip().lower()
+    if not text:
+        return None
+    if any(token in text for token in ("traceback", "fatal", "error:", "failed", "exception")):
+        return "Problem encountered"
+    if any(token in text for token in ("beta run complete", "completed successfully", "sequence complete")):
+        return "Completed"
+    if any(token in text for token in ("show folder", "mediafile", "writing xsq", "finaliz", "xlights_networks", "output_contract")):
+        return "Writing xLights show files"
+    if any(token in text for token in ("quality", "shortlist", "variant", "polish", "scor")):
+        return "Evaluating and polishing variants"
+    if any(token in text for token in ("drummer", "kick", "snare", "hihat", "hi-hat", "cymbal", " tom", "drum ")):
+        return "Building the drummer performance"
+    if any(token in text for token in ("effect", "choreograph", "placement", "model row", "render")):
+        return "Building model effects and choreography"
+    if any(token in text for token in ("audio", "beatgrid", "beat grid", "librosa", "onset", "tempo", "bpm", "analysis")):
+        return "Analyzing audio and musical structure"
+    if any(token in text for token in ("preparing helixville", "latest layout", "layout ready", "prepare layout")):
+        return "Preparing Helixville layout"
+    if any(token in text for token in ("starting beta sequence build", "engine arguments")):
+        return "Starting sequence build"
+    return None
 
 
 def _load_photo(path: Path, max_width: int, max_height: int) -> tk.PhotoImage | None:
@@ -131,12 +159,161 @@ def _invoke_root_method(root: tk.Tk, method_name: str) -> None:
         callback()
 
 
-def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
-    """Restore the original Helix identity/support affordances onto the beta GUI.
+class ProgressReportWindow(tk.Toplevel):
+    """Live user-facing view of what the sequencer is doing right now."""
 
-    This deliberately stays separate from sequencing logic. Missing art or desktop
-    browser integration must never prevent the beta engine from launching.
-    """
+    def __init__(self, root: tk.Tk) -> None:
+        super().__init__(root)
+        self.root = root
+        self.title("Helix Progress Report")
+        self.geometry("780x540")
+        self.minsize(620, 420)
+        self.configure(bg="#0a0a0b")
+        self.protocol("WM_DELETE_WINDOW", self.withdraw)
+        self._running = False
+        self._started_at: float | None = None
+        self._tick_job: str | None = None
+
+        self.status_var = tk.StringVar(value="Ready")
+        self.stage_var = tk.StringVar(value="Waiting for a sequence run.")
+        self.elapsed_var = tk.StringVar(value="Elapsed: 0:00")
+
+        top = ttk.Frame(self)
+        top.pack(fill=tk.X, padx=14, pady=(14, 8))
+        ttk.Label(top, text="Progress Report", style="Header.TLabel").pack(side=tk.LEFT)
+        ttk.Label(top, textvariable=self.status_var, style="Status.TLabel").pack(side=tk.RIGHT)
+
+        stage = ttk.LabelFrame(self, text="What Helix is doing")
+        stage.pack(fill=tk.X, padx=14, pady=(0, 8))
+        ttk.Label(stage, textvariable=self.stage_var, font=("Segoe UI", 11, "bold")).pack(
+            side=tk.LEFT,
+            padx=10,
+            pady=8,
+        )
+        ttk.Label(stage, textvariable=self.elapsed_var).pack(side=tk.RIGHT, padx=10, pady=8)
+
+        self.progress = ttk.Progressbar(self, mode="indeterminate")
+        self.progress.pack(fill=tk.X, padx=14, pady=(0, 8))
+
+        log_frame = ttk.LabelFrame(self, text="Live details")
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 8))
+        self.log = ScrolledText(
+            log_frame,
+            wrap=tk.WORD,
+            bg="#0a0a0b",
+            fg="#e4e1db",
+            insertbackground="#e4e1db",
+            relief=tk.FLAT,
+            padx=10,
+            pady=10,
+            font=("Cascadia Mono", 9),
+        )
+        self.log.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.log.configure(state=tk.DISABLED)
+
+        actions = ttk.Frame(self)
+        actions.pack(fill=tk.X, padx=14, pady=(0, 12))
+        ttk.Button(
+            actions,
+            text="Open Output",
+            command=lambda: _invoke_root_method(root, "_open_output_folder"),
+        ).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Hide", command=self.withdraw).pack(side=tk.RIGHT)
+
+        self.withdraw()
+
+    def show(self) -> None:
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def begin(self) -> None:
+        self.show()
+        self._running = True
+        self._started_at = time.monotonic()
+        self.status_var.set("RUNNING")
+        self.stage_var.set("Starting sequence build")
+        self.elapsed_var.set("Elapsed: 0:00")
+        self.log.configure(state=tk.NORMAL)
+        self.log.delete("1.0", tk.END)
+        self.log.configure(state=tk.DISABLED)
+        self.progress.start(12)
+        self._schedule_tick()
+
+    def set_running(self, running: bool) -> None:
+        self._running = bool(running)
+        if running:
+            if self._started_at is None:
+                self._started_at = time.monotonic()
+            self.status_var.set("RUNNING")
+            self.progress.start(12)
+            self._schedule_tick()
+        else:
+            self.progress.stop()
+            if self.status_var.get() == "RUNNING":
+                self.status_var.set("FINISHING")
+
+    def append(self, message: str) -> None:
+        text = str(message)
+        stage = progress_stage_for_line(text)
+        if stage:
+            self.stage_var.set(stage)
+            if stage == "Completed":
+                self.status_var.set("COMPLETE")
+                self._running = False
+                self.progress.stop()
+            elif stage == "Problem encountered":
+                self.status_var.set("ATTENTION")
+
+        stamp = time.strftime("%H:%M:%S")
+        self.log.configure(state=tk.NORMAL)
+        self.log.insert(tk.END, f"[{stamp}] {text}\n")
+        self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def _schedule_tick(self) -> None:
+        if self._tick_job is None:
+            self._tick_job = self.after(500, self._tick)
+
+    def _tick(self) -> None:
+        self._tick_job = None
+        if self._started_at is not None:
+            elapsed = max(0, int(time.monotonic() - self._started_at))
+            minutes, seconds = divmod(elapsed, 60)
+            self.elapsed_var.set(f"Elapsed: {minutes}:{seconds:02d}")
+        if self._running:
+            self._schedule_tick()
+
+
+def _install_progress_report_hooks(root: tk.Tk) -> ProgressReportWindow:
+    existing = getattr(root, "_helix_progress_report", None)
+    if isinstance(existing, ProgressReportWindow):
+        return existing
+
+    progress = ProgressReportWindow(root)
+    setattr(root, "_helix_progress_report", progress)
+
+    original_log = getattr(root, "_log", None)
+    if callable(original_log):
+        def mirrored_log(message: str) -> None:
+            original_log(message)
+            progress.append(message)
+        setattr(root, "_log", mirrored_log)
+
+    original_set_running = getattr(root, "_set_running", None)
+    if callable(original_set_running):
+        def mirrored_set_running(running: bool) -> None:
+            if running:
+                progress.begin()
+            original_set_running(running)
+            progress.set_running(running)
+        setattr(root, "_set_running", mirrored_set_running)
+
+    return progress
+
+
+def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
+    """Restore original branding/support controls plus the live progress report."""
 
     icon_path = resolve(ICON_FILENAME)
     if icon_path.is_file():
@@ -152,18 +329,17 @@ def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
     if header is None:
         return
 
+    progress = _install_progress_report_hooks(root)
+
     legacy_panel = ttk.Frame(header)
     legacy_panel.pack(side=tk.RIGHT, anchor="ne")
 
     image_panel = ttk.Frame(legacy_panel)
     image_panel.pack(side=tk.LEFT, padx=(0, 8))
 
-    # Keep the original art visible without making the banner tall enough to
-    # push primary run controls below common 768px laptop screens.
     mascot_photo = _load_photo(resolve(MASCOT_FILENAME), 48, 48)
     logo_photo = _load_photo(resolve(LOGO_FILENAME), 36, 36)
     photos = [photo for photo in (mascot_photo, logo_photo) if photo is not None]
-    # Retain references so Tk does not garbage-collect the images.
     setattr(root, "_legacy_branding_photos", photos)
 
     if mascot_photo is not None:
@@ -174,26 +350,23 @@ def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
     buttons = ttk.Frame(legacy_panel)
     buttons.pack(side=tk.RIGHT, anchor="ne")
 
-    # Keep the primary actions in the always-visible header. The main UI still
-    # retains its lower action bar for larger screens, but these controls make
-    # the beta usable on 768px-tall Windows laptops where the lower bar can be
-    # clipped after restoring the legacy mascot/banner.
     ttk.Button(
         buttons,
         text="Run Sequence",
         style="Primary.TButton",
         command=lambda: _invoke_root_method(root, "_run_sequence"),
     ).grid(row=0, column=0, padx=3, pady=2)
+    ttk.Button(buttons, text="Progress", command=progress.show).grid(row=0, column=1, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Instructions",
         command=lambda: open_instructions(root, resolve),
-    ).grid(row=0, column=1, padx=3, pady=2)
+    ).grid(row=0, column=2, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Legal",
         command=lambda: open_legal(root, resolve),
-    ).grid(row=0, column=2, padx=3, pady=2)
+    ).grid(row=0, column=3, padx=3, pady=2)
     ttk.Button(
         buttons,
         text="Open Output",
@@ -208,4 +381,4 @@ def install_legacy_branding(root: tk.Tk, resolve: PathResolver) -> None:
         buttons,
         text="Support xLights",
         command=lambda: _open_support(SUPPORT_DONATE_URL),
-    ).grid(row=1, column=2, padx=3, pady=2)
+    ).grid(row=1, column=2, columnspan=2, padx=3, pady=2, sticky="ew")
