@@ -84,12 +84,16 @@ class MultimodalReferenceTests(unittest.TestCase):
                     "video_contrast": 0.2,
                     "video_motion": 0.05,
                     "video_dark_fraction": 0.8,
+                    "video_covered": True,
+                    "video_coverage_fraction": 1.0,
                 },
                 "chorus": {
                     "video_mean_luma": 0.7,
                     "video_contrast": 0.4,
                     "video_motion": 0.3,
                     "video_dark_fraction": 0.1,
+                    "video_covered": True,
+                    "video_coverage_fraction": 1.0,
                 },
             }
             with mock.patch("core.multimodal_reference._video_metrics", return_value=visual):
@@ -126,6 +130,8 @@ class MultimodalReferenceTests(unittest.TestCase):
                     "video_contrast": 0.0,
                     "video_motion": 0.0,
                     "video_dark_fraction": 0.0,
+                    "video_covered": True,
+                    "video_coverage_fraction": 1.0,
                 }
                 for label in ("intro", "chorus")
             }
@@ -159,12 +165,16 @@ class MultimodalReferenceTests(unittest.TestCase):
                     "video_contrast": 0.2,
                     "video_motion": 0.05,
                     "video_dark_fraction": 0.8,
+                    "video_covered": True,
+                    "video_coverage_fraction": 1.0,
                 },
                 "chorus": {
                     "video_mean_luma": 0.7,
                     "video_contrast": 0.4,
                     "video_motion": 0.3,
                     "video_dark_fraction": 0.1,
+                    "video_covered": True,
+                    "video_coverage_fraction": 1.0,
                 },
             }
             with mock.patch("core.multimodal_reference._video_metrics", return_value=reference_metrics):
@@ -187,6 +197,19 @@ class MultimodalReferenceTests(unittest.TestCase):
             self.assertEqual(comparison["overall_score"], 100.0)
             self.assertEqual([item["label"] for item in comparison["sections"]], ["intro", "chorus"])
             self.assertNotIn(str(candidate), json.dumps(comparison))
+
+            bundle["calibration"]["sections"][0]["video_covered"] = False
+            bundle["calibration"]["sections"][0]["video_coverage_fraction"] = 0.0
+            excerpt_profile = load_lms_calibration(self._write_bundle(root, bundle))
+            with mock.patch("core.multimodal_reference._video_metrics", return_value=reference_metrics):
+                excerpt_comparison = compare_candidate_video(
+                    candidate_video_path=candidate,
+                    profile=excerpt_profile,
+                )
+            self.assertEqual(
+                [item["label"] for item in excerpt_comparison["sections"]],
+                ["chorus"],
+            )
 
     @staticmethod
     def _write_bundle(root: Path, bundle: dict[str, object]) -> Path:
