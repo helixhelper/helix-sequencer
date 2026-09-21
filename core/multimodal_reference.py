@@ -107,12 +107,27 @@ def _video_metrics(
     def average(values: list[float]) -> float:
         return round(sum(values) / len(values), 6) if values else 0.0
 
+    section_by_label = {item.label: item for item in wanted}
+    sampled_fps = source_fps / stride
     return {
         label: {
             "video_mean_luma": average(bucket["luma"]),
             "video_contrast": average(bucket["contrast"]),
             "video_motion": average(bucket["motion"]),
             "video_dark_fraction": average(bucket["dark"]),
+            "video_covered": bool(bucket["luma"]),
+            "video_coverage_fraction": round(
+                min(
+                    1.0,
+                    len(bucket["luma"])
+                    / max(
+                        1.0,
+                        (section_by_label[label].end_seconds - section_by_label[label].start_seconds)
+                        * sampled_fps,
+                    ),
+                ),
+                6,
+            ),
         }
         for label, bucket in accum.items()
     }
@@ -261,7 +276,10 @@ def compare_candidate_video(
         "video_dark_fraction": 0.40,
     }
     comparisons: list[dict[str, Any]] = []
-    for target in profile.sections:
+    covered_targets = [target for target in profile.sections if target.video_covered]
+    if not covered_targets:
+        raise ValueError("Reference calibration has no video-covered sections.")
+    for target in covered_targets:
         actual = observed.get(target.label, {})
         component_scores = {
             key: similarity(float(actual.get(key, 0.0)), float(getattr(target, key)), tolerance)
