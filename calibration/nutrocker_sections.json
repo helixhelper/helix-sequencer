@@ -1,0 +1,18 @@
+{
+  "sections": [
+    {"label": "section_01", "start_seconds": 0.0, "end_seconds": 16.0},
+    {"label": "section_02", "start_seconds": 16.0, "end_seconds": 40.0},
+    {"label": "section_03", "start_seconds": 40.0, "end_seconds": 56.5},
+    {"label": "section_04_blackout", "start_seconds": 56.5, "end_seconds": 58.5},
+    {"label": "section_05", "start_seconds": 58.5, "end_seconds": 61.5},
+    {"label": "section_06", "start_seconds": 61.5, "end_seconds": 66.0},
+    {"label": "section_07", "start_seconds": 66.0, "end_seconds": 113.0},
+    {"label": "section_08", "start_seconds": 113.0, "end_seconds": 139.0},
+    {"label": "section_09", "start_seconds": 139.0, "end_seconds": 182.0},
+    {"label": "section_10", "start_seconds": 182.0, "end_seconds": 186.0},
+    {"label": "section_11", "start_seconds": 186.0, "end_seconds": 192.5},
+    {"label": "section_12", "start_seconds": 192.5, "end_seconds": 228.0},
+    {"label": "section_13", "start_seconds": 228.0, "end_seconds": 242.5},
+    {"label": "section_14", "start_seconds": 242.5, "end_seconds": 246.93}
+  ]
+}

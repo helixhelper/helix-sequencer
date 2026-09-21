@@ -78,10 +78,33 @@ class LmsInspectionReport:
 
 
 @dataclass(frozen=True)
+class ReferenceSectionTarget:
+    """Aggregate structural and physical-video targets for one song section."""
+
+    label: str
+    start_seconds: float
+    end_seconds: float
+    effect_count: int = 0
+    timing_grid_alignment: float = 0.0
+    median_effect_ms: int = 0
+    mean_active_fraction: float = 0.0
+    video_mean_luma: float = 0.0
+    video_contrast: float = 0.0
+    video_motion: float = 0.0
+    video_dark_fraction: float = 0.0
+    video_covered: bool = False
+    video_coverage_fraction: float = 0.0
+
+    def contains_ms(self, value: int) -> bool:
+        seconds = float(value) / 1000.0
+        return self.start_seconds <= seconds < self.end_seconds
+
+
+@dataclass(frozen=True)
 class ReferenceCalibrationProfile:
     """Safe, aggregate-only targets derived from a licensed reference LMS."""
 
-    schema: str = "helix.reference_calibration.v1"
+    schema: str = "helix.reference_calibration.v2"
     source_kind: str = "lms_aggregate"
     source_sha256: str = ""
     source_file_size_bytes: int = 0
@@ -99,9 +122,24 @@ class ReferenceCalibrationProfile:
     mean_active_fraction: float = 0.0
     p90_active_fraction: float = 0.0
     peak_active_fraction: float = 0.0
+    audio_sha256: str = ""
+    video_sha256: str = ""
+    video_offset_seconds: float = 0.0
+    sections: tuple[ReferenceSectionTarget, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "ReferenceCalibrationProfile":
+        allowed = set(cls.__dataclass_fields__)
+        values = {key: value for key, value in payload.items() if key in allowed and key != "sections"}
+        values["sections"] = tuple(
+            ReferenceSectionTarget(**item)
+            for item in payload.get("sections", [])
+            if isinstance(item, Mapping)
+        )
+        return cls(**values)
 
 
 @dataclass
@@ -121,6 +159,7 @@ class CalibrationApplication:
     timing_snapped: int = 0
     duration_considered: int = 0
     duration_adjusted: int = 0
+    section_decisions: Counter[str] = field(default_factory=Counter)
 
     def __post_init__(self) -> None:
         self.strength = _clamp(float(self.strength), 0.0, 1.0)
@@ -169,9 +208,19 @@ class CalibrationApplication:
         st = int(start_ms)
         en = max(st + 1, int(end_ms))
         minimum = max(1, int(min_duration_ms))
-        target_duration = max(minimum, int(self.profile.median_effect_ms))
+        section = next((item for item in self.profile.sections if item.contains_ms(st)), None)
+        if section is not None:
+            self.section_decisions[section.label] += 1
+        target_duration = max(
+            minimum,
+            int(section.median_effect_ms if section and section.median_effect_ms else self.profile.median_effect_ms),
+        )
         self.duration_considered += 1
-        reference_activity = self.profile.mean_active_fraction or 0.5
+        reference_activity = (
+            section.mean_active_fraction
+            if section and section.mean_active_fraction
+            else self.profile.mean_active_fraction or 0.5
+        )
         duration_probability = self.strength * _clamp(reference_activity, 0.25, 0.75)
         if (
             target_duration > 0
@@ -183,7 +232,12 @@ class CalibrationApplication:
 
         grid_ms = max(0, int(self.profile.timing_grid_ms))
         self.timing_considered += 1
-        snap_probability = self.strength * _clamp(self.profile.timing_grid_alignment, 0.0, 1.0)
+        alignment = (
+            section.timing_grid_alignment
+            if section and section.timing_grid_alignment
+            else self.profile.timing_grid_alignment
+        )
+        snap_probability = self.strength * _clamp(alignment, 0.0, 1.0)
         if grid_ms > 0 and _stable_fraction(stable_key, "grid-calibration") < snap_probability:
             st = _round_to_grid(st, grid_ms)
             en = _round_to_grid(en, grid_ms)
@@ -205,6 +259,7 @@ class CalibrationApplication:
             "timing_snapped": self.timing_snapped,
             "duration_considered": self.duration_considered,
             "duration_adjusted": self.duration_adjusted,
+            "section_decisions": dict(sorted(self.section_decisions.items())),
         }
 
 
@@ -629,7 +684,15 @@ def calibration_from_report(report: LmsInspectionReport) -> ReferenceCalibration
 
 
 def load_lms_calibration(path: str | Path) -> ReferenceCalibrationProfile:
-    return calibration_from_report(inspect_lms(path))
+    source = Path(path)
+    if source.suffix.lower() == ".json":
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        if payload.get("schema") == "helix.multimodal_reference.v1":
+            payload = payload.get("calibration", {})
+        if not isinstance(payload, Mapping):
+            raise ValueError("Reference calibration JSON must contain an object.")
+        return ReferenceCalibrationProfile.from_dict(payload)
+    return calibration_from_report(inspect_lms(source))
 
 
 def summarize_calibration_result(
