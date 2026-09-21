@@ -58,3 +58,9 @@ python -m tools.compare_multimodal_reference \
 The comparison reports section-level brightness, contrast, movement, darkness,
 and an overall perceptual-match score. These measurements do not copy reference
 choreography into the generated sequence.
+
+The profile also records `video_covered` and `video_coverage_fraction` for each
+section. This allows an excerpted physical-show recording to remain useful:
+covered sections contribute video targets, partially covered sections disclose
+their observed fraction, and unrecorded sections are excluded from visual
+comparison instead of being mistaken for black frames.
