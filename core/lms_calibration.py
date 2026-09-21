@@ -92,6 +92,8 @@ class ReferenceSectionTarget:
     video_contrast: float = 0.0
     video_motion: float = 0.0
     video_dark_fraction: float = 0.0
+    video_covered: bool = False
+    video_coverage_fraction: float = 0.0
 
     def contains_ms(self, value: int) -> bool:
         seconds = float(value) / 1000.0
