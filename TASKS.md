@@ -1,67 +1,53 @@
 # Helix Agent Task Index
 
-This is the short starting point for humans, Codex-style coding agents, and autonomous repo agents.
-
-## Recovery: verify before closing
-
-Before treating a recently closed implementation or validation issue as complete, record:
-
-- [x] CI status for the recovery series through PR #97.
-- [x] Full and targeted test status for the recovery series through PR #97.
-- [ ] Generated XSQ artifacts.
-- [ ] MP4 artifacts.
-- [ ] xLights import evidence.
-- [ ] Manual validation evidence.
-- [ ] Remaining known gaps.
+> **Start here:** MASTER_TODO.md is the canonical cross-agent roadmap and handoff ledger.
 
 ## First read
 
-1. `ROADMAP_BETA_TODO.md` — canonical beta-version roadmap and autonomous TODO.
-2. `docs/SUPPORT_MATRIX.md` — supported beta platforms, inputs, and boundaries.
-3. `docs/BETA_POLICY.md` — data-use, safety, and asset-handling policy.
-4. `AGENTS.md` — repo-wide agent rules.
-5. `README.md` — active entrypoints and current repo structure.
+1. MASTER_TODO.md — canonical state, roadmap, decisions, unresolved work, and change ledger.
+2. AGENTS.md — mandatory agent operating rules.
+3. ROADMAP_BETA_TODO.md — existing beta roadmap; reconcile changes into the master ledger.
+4. README.md / README_CURRENT.md — active entrypoints and current repo structure.
+
+## Continuity rule
+
+Every agent change must update MASTER_TODO.md in the same change set.
+
+Before editing:
+- Read the relevant master roadmap section.
+- Inspect current implementation.
+- Identify behavior that must be preserved.
+- Choose one small implementation slice.
+
+After editing:
+- Update the Change Ledger.
+- Record tests and artifacts.
+- Record limitations and deferred work.
+- Do not declare completion without appropriate evidence.
 
 ## Current next recommended task
 
-Proceed with the remaining Issue #76 artifact evidence work:
+1. Audit the current drummer/band implementation against MASTER_TODO.md.
+2. Identify implemented-but-unverified drummer behavior.
+3. Generate the current XSQ + MP4 baseline.
+4. Fix the highest-impact drummer gap as one isolated slice.
+5. Update MASTER_TODO.md before beginning another slice.
 
-1. Generate a repo-safe representative XSQ artifact from deterministic/sample inputs.
-2. Run the lightweight preview renderer when inputs are safe and record whether an MP4 was produced.
-3. Capture xLights import/manual review notes separately from automated pytest evidence.
-4. Record controller/channel safety evidence before claiming production readiness.
+## Recovery / evidence
 
-## Agent operating checklist
-
-Before editing:
-
-- [ ] Work on a feature branch; do not edit `main` directly.
-- [ ] Read the roadmap phase you are implementing.
-- [ ] Confirm the change is the smallest useful slice.
-- [ ] Do not commit private tester files, songs, layouts, templates, screenshots, or generated outputs.
-
-Before opening a PR:
-
-- [ ] Update roadmap checkboxes if acceptance criteria changed.
-- [ ] Add or update docs when behavior changes.
-- [ ] Include test output, manual reproduction steps, or a clear reason tests were not run.
-- [ ] Record notable technical decisions in `docs/DECISIONS.md` when they affect future agents.
-
-## Current beta priorities
-
-1. Documentation and policy baseline.
-2. Reproducible dependency/CI setup.
-3. Clean-room smoke fixture.
-4. Run manifest and no-overwrite guarantees.
-5. GUI beta mode and dry-check behavior.
-6. Beta README, feedback form, and issue templates.
-7. Windows packaging smoke.
-8. Engine facade and typed config/result containment.
+Do not treat a task as fully closed until the applicable evidence exists:
+- [ ] CI status
+- [ ] targeted/full tests
+- [ ] generated XSQ
+- [ ] generated MP4 when visual behavior is involved
+- [ ] xLights import evidence
+- [ ] manual visual validation
+- [ ] remaining known gaps
 
 ## Non-goals for near-term agents
 
-- Do not perform a major rewrite of `core/effect_engine.py` yet.
+- Do not perform a major rewrite of core/effect_engine.py without a documented migration plan.
 - Do not train on user/tester sequences or layouts.
 - Do not add marketplace/model scraping.
 - Do not claim production-quality unattended show deployment.
-- Do not broaden support to every legacy profile until the beta path is stable.
+- Do not broaden legacy-profile support until the beta path is stable.
