@@ -27,13 +27,6 @@ DRUMMER_TARGETS = {
     "both_crash": ("HX_SNOWMAN_DRUMMER_CYMBAL_LEFT", "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT", "HX_SNOWMAN_DRUMMER_LEFT_STICK", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
     "downbeat_impact": ("HX_SNOWMAN_DRUMMER_KICK", "HX_SNOWMAN_DRUMMER_SNARE", "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT", "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT", "HX_SNOWMAN_DRUMMER_LEFT_STICK", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
 }
-POSE_CHANNELS = {
-    "kick_hit": (257, 264), "snare_hit": (258, 262, 263),
-    "hi_hat_pulse": (259, 262), "left_tom_hit": (260, 262),
-    "right_tom_hit": (260, 263), "left_crash": (261, 262),
-    "right_crash": (261, 263), "both_crash": (261, 262, 263),
-    "downbeat_impact": (264, 257, 258, 261, 262, 263),
-}
 
 def _find_or_create_element_effects(root):
     container = root.find("ElementEffects")
