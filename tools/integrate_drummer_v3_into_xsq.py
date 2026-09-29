@@ -93,7 +93,7 @@ def inject_drummer_v3(base_xsq, output_xsq, audio_path, *, layer_name="AUTO_Drum
             "base_xsq":str(base_xsq),"output_xsq":str(output_xsq),"audio":str(audio_path),
             "layer":layer_name,"fallback_mode":resolved["fallback_mode"],"event_count":len(pose_events),
             "placement_count":by_pose,
-            "pose_counts":{pose:sum(1 for event in pose_events if event["pose"]==pose) for pose in POSE_CHANNELS},
+            "pose_counts":{pose:sum(1 for event in pose_events if event["pose"]==pose) for pose in POSE_TARGETS},
             "targets":sorted(DRUMMER_TARGETS)}
 
 def main():
