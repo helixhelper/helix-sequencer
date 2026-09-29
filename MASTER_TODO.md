@@ -182,6 +182,28 @@ Newest entries go first.
 **Verification:** Repository inspection confirmed existing roadmap/task documents and active feature/restructure-core baseline.  
 **Next:** Enforce this protocol in AGENTS.md and TASKS.md.
 
+### 2026-09-29 — Current-state artifact render requested
+**Agent:** ChatGPT/GitHub MCP  
+**Branch/PR:** feature/restructure-core  
+**Goal:** Generate fresh current-state drummer and regular XSQ/MP4 artifacts from the present branch baseline.  
+
+**Changed:**
+- MASTER_TODO.md — recorded the artifact-validation run request so the push-triggered render workflows are traceable.
+
+**Preserved intentionally:**
+- No sequencing, mapping, drummer, layout, or renderer implementation was changed.
+- Existing feature/restructure-core code is the render subject.
+
+**New behavior:**
+- Trigger the branch's existing drummer and full-band render workflows from this documented baseline.
+
+**Tests/evidence:**
+- Fresh CI artifacts pending.
+- Historical full-Lights-Out drummer run was not reused because it failed before rendering on an older branch state.
+
+**Known limitations:**
+- xLights import/manual visual review remains separate from automated CI rendering.
+
 ## 9. Agent change-entry template
 
 ### YYYY-MM-DD — Short change name
