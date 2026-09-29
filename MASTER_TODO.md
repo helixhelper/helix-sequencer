@@ -204,6 +204,32 @@ Newest entries go first.
 **Known limitations:**
 - xLights import/manual visual review remains separate from automated CI rendering.
 
+### 2026-09-29 — Drummer render failure diagnosed and corrected
+**Agent:** ChatGPT/GitHub MCP  
+**Branch/PR:** feature/restructure-core / PR #22  
+**Goal:** Correct the failed drummer/full-render validation reported after the current-state artifact run.
+
+**Changed:**
+- audio/drum_classification.py — added harmonic/percussive separation and spectral-flatness/percussive-ratio gates so harmonic guitar attacks are not freely classified as cymbals/hats.
+- audio/drum_detection.py — records harmonic-vs-percussive and spectral-flatness features.
+- mapping/drum_mapper.py — maps drummer events to the real HX_SNOWMAN_DRUMMER performer and its actual drum/stick submodels.
+- tools/integrate_drummer_v3_into_xsq.py — injects effects into real drummer submodels rather than synthetic 257–264 elements.
+- tools/render_drummer_v3_preview.py — renders explicit kick/snare/hi-hat/tom/cymbal/stick targets.
+- .github/workflows/helix-full-current.yml — builds a render layout containing the real drummer geometry.
+- tests/test_drummer_v3_xsq_integration.py — updated mapping expectations.
+
+**Preserved intentionally:**
+- 256-channel AC sequencing remains intact.
+- The drummer remains virtual/performer-based rather than consuming the 256 AC channels.
+- Existing sequence generation and audio input remain unchanged apart from the drummer detection path.
+
+**Tests/evidence:**
+- Previous run exposed 840 detected cymbals versus 37 snares and 9 toms and had no real drummer geometry in the full-render layout.
+- Corrective code is now committed; fresh render artifact is the required next validation.
+
+**Known limitations:**
+- Corrected MP4 has not yet received visual review.
+
 ## 9. Agent change-entry template
 
 ### YYYY-MM-DD — Short change name
