@@ -71,7 +71,7 @@ def detect_drum_event_streams(
     y = np.asarray(y, dtype=np.float32).reshape(-1)
     if y.size == 0 or sr <= 0:
         return empty_drum_streams()
-    _, perc = librosa.effects.hpss(y)
+    harmonic, perc = librosa.effects.hpss(y)
     hop = 512
     n_fft = 2048
     onset_env = librosa.onset.onset_strength(y=perc, sr=sr, hop_length=hop)
@@ -97,6 +97,7 @@ def detect_drum_event_streams(
         )
         frames = np.asarray(peaks, dtype=int)
     stft = np.abs(librosa.stft(perc, n_fft=n_fft, hop_length=hop))
+    harmonic_rms = librosa.feature.rms(y=harmonic, hop_length=hop)[0]
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
     rms = librosa.feature.rms(y=perc, hop_length=hop)[0]
     rms01 = _norm01(rms)
@@ -113,7 +114,11 @@ def detect_drum_event_streams(
         high = _band_energy(freqs, spectrum, 2500, min(sr / 2, 14000))
         centroid = float(librosa.feature.spectral_centroid(S=spectrum.reshape(-1, 1), sr=sr)[0, 0])
         spread = float(librosa.feature.spectral_bandwidth(S=spectrum.reshape(-1, 1), sr=sr)[0, 0])
+        flatness = float(librosa.feature.spectral_flatness(S=spectrum.reshape(-1, 1))[0, 0])
         low_centroid = _band_centroid(freqs, spectrum, 20, 700)
+        p_rms = float(rms[frame]) if frame < len(rms) else 0.0
+        h_rms = float(harmonic_rms[frame]) if frame < len(harmonic_rms) else 0.0
+        percussive_ratio = p_rms / max(p_rms + h_rms, 1e-9)
 
         # Compare the short post-onset RMS to the later tail instead of using
         # absolute RMS. This makes the feature describe the hit's decay shape,
@@ -135,6 +140,8 @@ def detect_drum_event_streams(
             "centroid_hz": centroid,
             "low_centroid_hz": low_centroid,
             "spectral_spread01": min(1.0, spread / max(1.0, sr / 2)),
+            "spectral_flatness": min(1.0, flatness),
+            "percussive_ratio": min(1.0, percussive_ratio),
             "transient_sharpness": min(1.0, sharp),
             "decay_profile": min(1.0, decay),
         }
