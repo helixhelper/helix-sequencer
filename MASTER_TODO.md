@@ -230,6 +230,30 @@ Newest entries go first.
 **Known limitations:**
 - Corrected MP4 has not yet received visual review.
 
+### 2026-09-29 — Full-song real-audio render gate
+**Agent:** ChatGPT/GitHub MCP  
+**Branch/PR:** feature/restructure-core / PR #22  
+**Goal:** Ensure validation artifacts use the repository's actual song for the entire song, never a synthetic source or arbitrary 20-second clip.
+
+**Changed:**
+- tools/render_drummer_v3_preview.py — default duration is now the complete input audio duration; refuses to render if drummer XSQ coverage is materially shorter than the song.
+- .github/workflows/helix-full-current.yml — removed the 20-second drummer render cap and added full-song duration gates for the XSQ and both MP4 artifacts.
+
+**Preserved intentionally:**
+- The source remains the real repository audio `Helix Audiolights.mp3`.
+- The virtual drummer remains mapped to real HX_SNOWMAN_DRUMMER submodels.
+- The 256-channel sequence remains separate from the virtual performer and is still rendered as the full Helix show.
+
+**Tests/evidence:**
+- CI will fail if the repo song is unexpectedly short, if XSQ coverage is below 95% of the song, or if either MP4 differs from the song duration by more than one second.
+- Fresh artifact run and visual review are still required before declaring the drummer baseline verified.
+
+**Known limitations:**
+- The corrected full-song artifact has not yet been rendered/reviewed on the current commits.
+
+**Deferred work:**
+- Compare actual drummer event timing against audible drum transients across the full song and continue tightening false-positive classification if needed.
+
 ## 9. Agent change-entry template
 
 ### YYYY-MM-DD — Short change name
