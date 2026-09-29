@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -121,20 +122,54 @@ def draw_drummer(width: int, height: int, active: dict[str, float], t_ms: int, d
     return im
 
 
+
+def _audio_duration_ms(audio: Path) -> int:
+    ff = imageio_ffmpeg.get_ffmpeg_exe()
+    proc = subprocess.run(
+        [ff, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(audio)],
+        capture_output=True, text=True,
+    )
+    if proc.returncode == 0:
+        try:
+            data = json.loads(proc.stdout)
+            duration = float(data["format"]["duration"])
+            if duration > 0:
+                return int(round(duration * 1000.0))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    probe = subprocess.run([ff, "-i", str(audio)], capture_output=True, text=True)
+    marker = "Duration: "
+    for line in probe.stderr.splitlines():
+        if marker in line:
+            value = line.split(marker, 1)[1].split(",", 1)[0].strip()
+            h, m, s = value.split(":")
+            return int(round((int(h) * 3600 + int(m) * 60 + float(s)) * 1000.0))
+    raise RuntimeError(f"Unable to determine audio duration for {audio}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("xsq", type=Path)
     ap.add_argument("--audio", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--duration", type=float, default=20)
+    ap.add_argument("--duration", type=float, default=0.0, help="Optional debug cap in seconds; default renders the entire audio.")
     args = ap.parse_args()
 
     effects = parse_effects(args.xsq)
     if not effects:
         raise SystemExit("FAIL: no real HX_SNOWMAN_DRUMMER submodel effects found")
 
-    duration_ms = min(int(args.duration * 1000), max(1000, max(e[1] for e in effects)))
+    audio_duration_ms = _audio_duration_ms(args.audio)
+    effect_end_ms = max(e[1] for e in effects)
+    if effect_end_ms < int(audio_duration_ms * 0.95):
+        raise SystemExit(
+            f"FAIL: drummer XSQ ends at {effect_end_ms} ms, but repo audio is {audio_duration_ms} ms; "
+            "refusing to render a partial performance"
+        )
+    duration_ms = audio_duration_ms if args.duration <= 0 else min(int(args.duration * 1000), audio_duration_ms)
+    if args.duration <= 0:
+        print(f"FULL-SONG MODE: audio_duration_ms={audio_duration_ms} effect_end_ms={effect_end_ms}")
     out = args.output
     silent = out.with_suffix(".silent.mp4")
     font = ImageFont.load_default()
@@ -161,7 +196,7 @@ def main() -> int:
 
     if not out.exists() or out.stat().st_size < 10000:
         raise SystemExit("FAIL: drummer MP4 missing/empty")
-    print(f"PASS: real drummer MP4 targets={len(TARGETS)} effects={len(effects)} duration_ms={duration_ms}")
+    print(f"PASS: real drummer MP4 targets={len(TARGETS)} effects={len(effects)} duration_ms={duration_ms} audio_duration_ms={audio_duration_ms}")
     return 0
 
 
