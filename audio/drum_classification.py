@@ -44,6 +44,9 @@ class DrumClassifierThresholds:
     hihat_decay_max: float = 0.42
     cymbal_high_ratio_min: float = 0.32
     cymbal_decay_min: float = 0.42
+    cymbal_percussive_ratio_min: float = 0.28
+    cymbal_flatness_min: float = 0.035
+    hihat_percussive_ratio_min: float = 0.22
 
 
 def empty_drum_streams() -> dict[str, list[DrumEvent]]:
@@ -77,6 +80,8 @@ def classify_drum_hit(
     spread = _clamp(features.get("spectral_spread01", 0.0))
     sharp = _clamp(features.get("transient_sharpness", 0.0))
     decay = _clamp(features.get("decay_profile", 0.0))
+    percussive_ratio = _clamp(features.get("percussive_ratio", 0.0))
+    flatness = _clamp(features.get("spectral_flatness", 0.0))
 
     # Evaluate kick from the low-frequency energy itself. A full-spectrum
     # centroid is intentionally not used here because a real kick can share
@@ -96,12 +101,18 @@ def classify_drum_hit(
         high >= thresholds.hihat_high_ratio_min
         and decay <= thresholds.hihat_decay_max
         and sharp >= thresholds.snare_sharpness_min
+        and percussive_ratio >= thresholds.hihat_percussive_ratio_min
     ):
         confidence = _clamp((high * 0.55) + (sharp * 0.30) + ((1.0 - decay) * 0.15))
         return "hihat", round(confidence, 3)
 
-    if high >= thresholds.cymbal_high_ratio_min and decay >= thresholds.cymbal_decay_min:
-        confidence = _clamp((high * 0.45) + (decay * 0.35) + (spread * 0.20))
+    if (
+        high >= thresholds.cymbal_high_ratio_min
+        and decay >= thresholds.cymbal_decay_min
+        and percussive_ratio >= thresholds.cymbal_percussive_ratio_min
+        and flatness >= thresholds.cymbal_flatness_min
+    ):
+        confidence = _clamp((high * 0.36) + (decay * 0.24) + (percussive_ratio * 0.24) + (flatness * 0.16))
         return "cymbal", round(confidence, 3)
 
     if (
@@ -131,8 +142,8 @@ def classify_drum_hit(
         ("kick", (low * 0.55) + ((1.0 - min(1.0, low_centroid / 1200.0)) * 0.25) + (sharp * 0.20)),
         ("snare", (mid * 0.42) + (sharp * 0.32) + (spread * 0.18) + (mid_low * 0.08)),
         ("tom", (mid_low * 0.48) + ((1.0 - abs(centroid - 900.0) / 1800.0) * 0.22) + (decay * 0.16) + (sharp * 0.14)),
-        ("hihat", (high * 0.56) + (sharp * 0.28) + ((1.0 - decay) * 0.16)),
-        ("cymbal", (high * 0.42) + (decay * 0.36) + (spread * 0.22)),
+        ("hihat", (high * 0.48) + (sharp * 0.24) + ((1.0 - decay) * 0.14) + (percussive_ratio * 0.14)),
+        ("cymbal", (high * 0.34) + (decay * 0.24) + (spread * 0.12) + (percussive_ratio * 0.20) + (flatness * 0.10)),
     ]
     drum_type, score = max(candidates, key=lambda item: item[1])
 
@@ -144,8 +155,13 @@ def classify_drum_hit(
         score *= 0.76
     if drum_type == "hihat" and high < thresholds.hihat_high_ratio_min:
         score *= 0.72
-    if drum_type == "cymbal" and (high < thresholds.cymbal_high_ratio_min or decay < thresholds.cymbal_decay_min):
-        score *= 0.78
+    if drum_type == "cymbal" and (
+        high < thresholds.cymbal_high_ratio_min
+        or decay < thresholds.cymbal_decay_min
+        or percussive_ratio < thresholds.cymbal_percussive_ratio_min
+        or flatness < thresholds.cymbal_flatness_min
+    ):
+        score *= 0.60
 
     confidence = _clamp(score)
     if confidence < thresholds.low_confidence_min:
