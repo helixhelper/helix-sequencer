@@ -78,10 +78,58 @@ jobs:
       - name: Render HQ MP4
         env: {PYTHONPATH: .}
         run: python -m tools.preview_hq test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.xsq --layout test_runs/full_current/xlights_rgbeffects_full_band.xml --audio 'Helix Audiolights.mp3' --quality-preset xlights
+      - name: Validate full-song duration before artifact generation
+        env: {PYTHONPATH: .}
+        run: |
+          python - <<'PY'
+          import subprocess, xml.etree.ElementTree as ET
+          from pathlib import Path
+          import imageio_ffmpeg
+          audio = Path('Helix Audiolights.mp3')
+          ff = imageio_ffmpeg.get_ffmpeg_exe()
+          probe = subprocess.run([ff, '-i', str(audio)], capture_output=True, text=True)
+          line = next((x for x in probe.stderr.splitlines() if 'Duration:' in x), None)
+          assert line, 'could not determine repo song duration'
+          value = line.split('Duration:',1)[1].split(',',1)[0].strip()
+          h,m,s = value.split(':')
+          audio_ms = int(round((int(h)*3600 + int(m)*60 + float(s))*1000))
+          assert audio_ms > 60000, f'repo song unexpectedly short: {audio_ms} ms'
+          xsq = Path('test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.xsq')
+          root = ET.parse(xsq).getroot()
+          ends = [int(float(e.get('endTime','0'))) for e in root.findall('.//Effect') if e.get('endTime')]
+          xsq_ms = max(ends)
+          assert xsq_ms >= int(audio_ms*0.95), f'XSQ ends at {xsq_ms} ms but song is {audio_ms} ms'
+          print(f'FULL-SONG VALIDATION: audio_ms={audio_ms} xsq_end_ms={xsq_ms}')
+          PY
       - name: Render actual Drummer V3 with soundtrack
         env: {PYTHONPATH: .}
         run: |
-          python tools/render_drummer_v3_preview.py             test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.xsq             --audio 'Helix Audiolights.mp3'             --output test_runs/full_current/Helix_Drummer_V3_WITH_MUSIC.mp4             --duration 20             --fps 30
+          python tools/render_drummer_v3_preview.py             test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.xsq             --audio 'Helix Audiolights.mp3'             --output test_runs/full_current/Helix_Drummer_V3_WITH_MUSIC.mp4             --fps 30
+      - name: Validate rendered MP4 durations
+        env: {PYTHONPATH: .}
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          import imageio_ffmpeg
+          ff = imageio_ffmpeg.get_ffmpeg_exe()
+          audio = Path('Helix Audiolights.mp3')
+          outputs = [
+              Path('test_runs/full_current/Helix_Drummer_V3_WITH_MUSIC.mp4'),
+              Path('test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.mp4'),
+          ]
+          def duration_ms(path):
+              p=subprocess.run([ff,'-i',str(path)],capture_output=True,text=True)
+              line=next(x for x in p.stderr.splitlines() if 'Duration:' in x)
+              v=line.split('Duration:',1)[1].split(',',1)[0].strip()
+              h,m,s=v.split(':')
+              return int(round((int(h)*3600+int(m)*60+float(s))*1000))
+          audio_ms=duration_ms(audio)
+          for path in outputs:
+              ms=duration_ms(path)
+              assert abs(ms-audio_ms) <= 1000, f'{path} duration {ms} ms != audio {audio_ms} ms'
+              print(f'FULL-SONG MP4 VALIDATION: {path.name} {ms} ms vs audio {audio_ms} ms')
+          PY
       - name: Upload full render
         if: always()
         uses: actions/upload-artifact@v4
