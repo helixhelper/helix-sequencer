@@ -33,8 +33,8 @@ def test_v3_mapper_only_emits_declared_v3_poses_and_targets() -> None:
     for item in mapped:
         pose = str(item["pose"])
         assert pose in POSE_TO_CHANNELS
-        assert str(item["model"]) == "HX_SNOWMAN_DRUMMER_V3"
-        assert all(str(name).startswith("HX_SNOWMAN_DRUMMER_V3_") for name in item["submodels"])
+        assert str(item["model"]) == "HX_SNOWMAN_DRUMMER"
+        assert all(str(name).startswith("HX_SNOWMAN_DRUMMER_") for name in item["submodels"])
 
 
 def test_injection_helper_preserves_existing_xlights_effect_container() -> None:
