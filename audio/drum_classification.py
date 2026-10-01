@@ -60,6 +60,8 @@ def score_drum_hit_families(
     centroid = float(features.get("centroid_hz", 0) or 0)
     low_centroid = float(features.get("low_centroid_hz", centroid) or centroid)
     low_flux_peak = float(features.get("low_flux_peak_hz", 0.0) or 0.0)
+    has_band_flux = "low_flux_strength" in features or "mid_low_flux_strength" in features
+    has_high_flux = "high_flux_strength" in features
     low_flux_strength = _clamp(features.get("low_flux_strength", 0.0))
     mid_low_flux_strength = _clamp(features.get("mid_low_flux_strength", 0.0))
     high_flux_strength = _clamp(features.get("high_flux_strength", 0.0))
@@ -146,7 +148,7 @@ def score_drum_hit_families(
         scores["tom"] *= .76
     if 0.0 < low_flux_peak < 75.0:
         scores["tom"] *= .65
-    if band_flux_strength < 0.30:
+    if has_band_flux and band_flux_strength < 0.30:
         scores["tom"] *= .45
     if high < thresholds.hihat_high_ratio_min:
         scores["hihat"] *= .72
@@ -159,7 +161,7 @@ def score_drum_hit_families(
         or flatness < thresholds.cymbal_flatness_min
     ):
         scores["cymbal"] *= .60
-    if high_flux_strength > 0.0 and high_flux_strength < 0.40:
+    if has_high_flux and high_flux_strength < 0.40:
         scores["cymbal"] *= .48
 
     return {name: round(_clamp(score), 3) for name, score in scores.items()}
