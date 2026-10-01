@@ -47,6 +47,7 @@ jobs:
           python -m pytest -q \
             tests/test_audio.py \
             tests/test_drum_detection.py \
+            tests/test_drum_mapper.py \
             tests/test_stem_cache.py
 
       - name: Run beta smoke tests
