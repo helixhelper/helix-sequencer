@@ -49,6 +49,13 @@ def test_component_mapper_never_emits_independent_sticks_or_arms() -> None:
     ]
 
 
+def test_component_mapper_suppresses_ambiguous_bus_instead_of_faking_kick() -> None:
+    mapped = map_events_to_drummer_components([
+        DrumEvent(0.1, 0.8, 0.4, {}, 1, "drum_bus", source="test"),
+    ])
+    assert mapped == []
+
+
 def test_v3_pose_adapter_uses_only_canonical_component_targets() -> None:
     events = [
         DrumEvent(0.1, 0.8, 0.7, {}, 1, "kick"),
