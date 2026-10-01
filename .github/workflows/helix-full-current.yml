@@ -1,7 +1,9 @@
 name: Helix Full Current 256 + Drummer
 on:
   push:
-    branches: [feature/restructure-core]
+    branches:
+      - feature/restructure-core
+      - codex/derwin-audio-intelligence-v1
   workflow_dispatch:
 permissions:
   contents: read
