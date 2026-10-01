@@ -40,12 +40,31 @@ Build Helix into a reliable AI-assisted xLights auto-sequencer while preserving 
 
 The repository has a richer stem-event adapter, but the current drummer path is not an external neural stem-separation pipeline. Do not claim Demucs/Spleeter-style separation is active until implemented and validated.
 
+## Ground-truth regression oracle
+A prior drummer render was explicitly identified by the user as having the **correct drummer logic** and must be preserved as the behavioral reference while the implementation is upgraded.
+
+- Known-good commit: `b27e8d77a63027ed32bcf6851dcff3925472c155`.
+- Prior successful artifact lineage: **Helix Full Current 256 + Drummer**; published workflow run `35486153096` was previously identified as the MP4-producing run.
+- The repository's dedicated ground-truth workflow at that point exercised the real V3 drummer submodels and generated deterministic audio/XSQ/preview artifacts.
+- Important historical contract: that older workflow used **8 V3 submodels** (kick, snare, hi-hat, left/right cymbal, left/right tom, drumkit-all). It is a regression oracle for behavior, not a reason to revert the current physical nine-component design.
+- Current nine-component geometry remains authoritative for the new implementation: four tom zones and contacting-stick geometry integrated into the hit component.
+
+**Rule:** do not discard or rewrite the behavior that made the prior render correct. New detection/mapping logic must be compared against the prior oracle before being accepted.
+
 ## Verification gate
-**audio → detected events → mapped components → XSQ → full-song MP4 with real audio → visual review**
+**audio → detected events → mapped components → XSQ → full-song MP4 with real audio → compare against prior correct drummer render → human visual review**
 
 Do not mark complete from unit tests alone.
 
 ## Change Ledger
+
+### 2026-09-30 — Ground-truth regression oracle locked
+**Agent:** ChatGPT/GitHub
+**Branch:** `feature/restructure-core`
+
+**Recorded:**
+- Prior known-good drummer behavior is anchored to commit `b27e8d77a63027ed32bcf6851dcff3925472c155`.
+- The historical 8-submodel V3 workflow is retained as a behavioral regression reference while the physical model evolves to nine components.
 
 ### 2026-09-30 — Confidence-gated drum classification
 **Agent:** ChatGPT/GitHub
@@ -64,7 +83,6 @@ Do not mark complete from unit tests alone.
 ### 2026-09-30 — Nine-component drummer geometry spec
 **Agent:** ChatGPT/GitHub
 **Branch:** `feature/restructure-core`
-**Commit:** `a6ee1e22c66fd1d9e4020b1c92538102262b23e7`
 
 **Changed:** `fixtures/band_geometry/drummer_v3_pose_spec.json`
 - Four distinct tom zones and nine canonical hit composites.
@@ -73,10 +91,11 @@ Do not mark complete from unit tests alone.
 **Known limitation:** xmodel exporter still needs to make the nine composites the canonical sequencing submodels.
 
 ## Next actions
-1. Reconcile xLights drummer geometry with the nine canonical composites.
-2. Add event provenance/debug output.
-3. Run detector on the repository's real song and inspect event counts by class/confidence.
-4. Generate full-song XSQ.
-5. Render full-song MP4 with real audio.
-6. Compare rendered component flashes to actual audible drum events.
-7. Iterate only on measured false positives/false negatives.
+1. Preserve the prior known-good drummer behavior as the regression baseline.
+2. Reconcile xLights drummer geometry with the nine canonical composites.
+3. Add event provenance/debug output.
+4. Run detector on the repository's real song and inspect event counts by class/confidence.
+5. Generate full-song XSQ.
+6. Render full-song MP4 with real audio.
+7. Compare rendered component flashes to actual audible drum events and the prior known-good render.
+8. Iterate only on measured false positives/false negatives.
