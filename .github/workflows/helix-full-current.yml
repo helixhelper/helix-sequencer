@@ -5,6 +5,10 @@ on:
       - feature/restructure-core
       - codex/derwin-audio-intelligence-v1
   workflow_dispatch:
+concurrency:
+  group: helix-full-current-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 jobs:
