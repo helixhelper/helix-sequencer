@@ -14,13 +14,14 @@ from audio.drum_classification import DrumClassifierThresholds, DrumEvent, empty
 class DrumDetectionConfig:
     onset_delta: float = 0.045
     onset_wait: int = 1
-    min_gap_ms: int = 22
+    min_gap_ms: int = 30
     low_confidence_min: float = 0.34
     multi_hit_confidence_min: float = 0.46
     multi_hit_score_window: float = 0.14
-    max_hits_per_onset: int = 2
+    max_hits_per_onset: int = 3
     spectral_flux_delta: float = 0.05
     band_flux_delta: float = 0.03
+    band_flux_candidate_min: float = 0.20
     detector_tolerance_frames: int = 1
     cluster_gap_ms: int = 95
     prefer_recall: bool = True
@@ -53,14 +54,20 @@ def _band_centroid(freqs: np.ndarray, spectrum: np.ndarray, low: float, high: fl
 
 
 def _compress_events(events: list[DrumEvent], min_gap_ms: int) -> list[DrumEvent]:
-    out: list[DrumEvent] = []
+    """Collapse near-duplicate detector candidates independently per family."""
+    by_type: dict[str, list[DrumEvent]] = {}
     for event in sorted(events, key=lambda item: (item.timestamp, item.drum_type)):
-        if out and event.timestamp_ms - out[-1].timestamp_ms < min_gap_ms and event.drum_type == out[-1].drum_type:
-            if event.velocity > out[-1].velocity:
-                out[-1] = event
+        bucket = by_type.setdefault(event.drum_type, [])
+        if bucket and event.timestamp_ms - bucket[-1].timestamp_ms < min_gap_ms:
+            previous = bucket[-1]
+            if (event.velocity, event.confidence) > (previous.velocity, previous.confidence):
+                bucket[-1] = event
             continue
-        out.append(event)
-    return out
+        bucket.append(event)
+    return sorted(
+        (event for bucket in by_type.values() for event in bucket),
+        key=lambda item: (item.timestamp, item.drum_type),
+    )
 
 
 def _cluster_id(timestamp_ms: int, previous_ms: int | None, current_cluster: int, gap_ms: int) -> tuple[int, int]:
@@ -247,6 +254,24 @@ def detect_drum_event_streams(
         mid_low_flux_env,
         delta=config.band_flux_delta,
         wait=config.onset_wait,
+    )
+    low_flux_frames = np.asarray(
+        [
+            int(frame)
+            for frame in low_flux_frames
+            if int(frame) < len(low_flux_env)
+            and float(low_flux_env[int(frame)]) >= config.band_flux_candidate_min
+        ],
+        dtype=int,
+    )
+    mid_low_flux_frames = np.asarray(
+        [
+            int(frame)
+            for frame in mid_low_flux_frames
+            if int(frame) < len(mid_low_flux_env)
+            and float(mid_low_flux_env[int(frame)]) >= config.band_flux_candidate_min
+        ],
+        dtype=int,
     )
 
     onset_frame_set = {int(frame) for frame in onset_frames}
