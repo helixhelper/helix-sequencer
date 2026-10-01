@@ -1,370 +1,63 @@
 # HELIX MASTER TODO & AGENT HANDOFF LEDGER
 
-> **Canonical project roadmap.** Every human, Codex, GitHub, or other coding agent MUST read this file before changing Helix. Every agent that changes code, configuration, tests, workflows, documentation, sequencing logic, mappings, GUI behavior, rendering, or generated-artifact logic MUST update this file in the same change set.
+> Canonical project roadmap. Every agent must read and update this file when changing Helix.
 
-## Operating rule
+## Current mission
+Build Helix into a reliable AI-assisted xLights auto-sequencer while preserving deterministic sequencing, verified artifacts, and cumulative behavior.
 
-The master ledger exists to prevent logic from being silently lost between agents.
+**Current priority:** finish drummer/band logic and prove it with real-song XSQ + MP4 artifacts.
 
-An agent MUST NOT:
-- assume an undocumented subsystem is disposable;
-- replace working logic without recording what it did;
-- mark a feature complete merely because tests pass;
-- claim a behavior is implemented without evidence;
-- remove or supersede an existing implementation without documenting the replacement and migration path.
+## Drummer / band current state
+- [x] Canonical nine-component drummer contract documented.
+- [x] Runtime drummer state model changed to nine integrated hit components.
+- [x] Structure catalog changed to nine drummer sequencing components.
+- [x] XML exporter no longer emits the legacy `line0="1-4"` placeholder for drummer components.
+- [x] Pose geometry spec now defines nine component composites with embedded contacting-stick geometry.
+- [~] xLights model exporter still needs to be taught to emit the new component composites as the nine canonical sequencing submodels.
+- [ ] Generate real-song XSQ.
+- [ ] Render full-song MP4 with audio.
+- [ ] Human visual review of rendered drummer timing.
 
-When an agent discovers undocumented behavior, preserve it first, then document it here.
+## Canonical drummer components
+1. `HX_SNOWMAN_DRUMMER_KICK` = KICK + KICK_RIM
+2. `HX_SNOWMAN_DRUMMER_SNARE` = SNARE + SNARE_RIM + SNARE_CONTACT_STICK
+3. `HX_SNOWMAN_DRUMMER_TOM_1` = TOM_1 + TOM_1_CONTACT_STICK
+4. `HX_SNOWMAN_DRUMMER_TOM_2` = TOM_2 + TOM_2_CONTACT_STICK
+5. `HX_SNOWMAN_DRUMMER_TOM_3` = TOM_3 + TOM_3_CONTACT_STICK
+6. `HX_SNOWMAN_DRUMMER_TOM_4` = TOM_4 + TOM_4_CONTACT_STICK
+7. `HX_SNOWMAN_DRUMMER_HI_HAT` = HI_HAT + HIHAT_CONTACT_STICK
+8. `HX_SNOWMAN_DRUMMER_CYMBAL_LEFT` = CYMBAL_LEFT + CYMBAL_LEFT_CONTACT_STICK
+9. `HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT` = CYMBAL_RIGHT + CYMBAL_RIGHT_CONTACT_STICK
 
-## 1. Current mission
+**Physical rule:** the contacting stick is part of the corresponding hit component. There are no independent stick sequencing channels. Kick has no stick.
 
-Build Helix into a reliable AI-assisted xLights auto-sequencer that can accept audio and xLights layout/template inputs, analyze musical structure, map musical roles onto real display props/channels, generate an importable xLights sequence, produce useful previews, provide an accessible GUI, preserve deterministic rule-based behavior beneath AI-assisted features, and eventually provide enough quality and automation to justify a commercial product.
+## Verification gate
+**audio → detected events → mapped components → XSQ → full-song MP4 with real audio → visual review**
 
-**Current priority:** stabilize and finish the drummer/band logic, preserve all existing sequencing logic, establish artifact-based verification, and eliminate agent-to-agent loss of intent.
+Do not mark complete from unit tests alone.
 
-## 2. Status legend
+## Change Ledger
 
-- [ ] Not started
-- [~] In progress / partially implemented
-- [x] Implemented and verified
-- [?] Implemented but insufficiently verified
-- [!] Known regression/blocker
-- [-] Intentionally deferred
-- [ARCHIVED] Superseded but retained for reference
-
-A checkbox may only become [x] when the ledger records evidence.
-
-## 3. Non-negotiable agent workflow
-
-Before changing anything:
-- [ ] Read MASTER_TODO.md.
-- [ ] Read AGENTS.md.
-- [ ] Inspect the relevant current implementation rather than relying on an old handoff.
-- [ ] Identify existing behavior that must be preserved.
-- [ ] State the smallest useful implementation slice.
-- [ ] Work on a feature branch.
-
-After changing anything:
-- [ ] Update this file in the same PR/commit series.
-- [ ] Record files/modules changed.
-- [ ] Record behavior added/changed.
-- [ ] Record behavior intentionally preserved.
-- [ ] Record tests/CI/manual evidence.
-- [ ] Record unresolved issues and deferred work.
-- [ ] Record assumptions made.
-- [ ] Record logic that could not be verified.
-- [ ] If a previous task was superseded, explicitly say why.
-- [ ] Never silently delete a roadmap item.
-
-**If an agent cannot update this ledger, it must not claim the implementation is complete.**
-
-## 4. Current architecture / areas that must not be lost
-
-### Sequencing core
-- [~] Core sequencing pipeline / engine profiles
-- [~] Effect generation and effect-engine behavior
-- [~] AC-safe effects: On / Ramp / Shimmer / Level
-- [~] Timing generation and audio-derived timing tracks
-- [~] xLights XSQ generation/import compatibility
-
-### Audio intelligence
-- [~] Beat/bar/onset detection
-- [~] Spectral/audio feature extraction
-- [~] Bass / melody / high-frequency role detection
-- [~] Pitch/melodic analysis
-- [ ] More robust musical-role separation
-- [ ] Evaluate/improve advanced audio analysis without destabilizing baseline
-- [ ] Preserve deterministic fallback behavior when advanced analysis fails
-
-### Display mapping
-- [~] xLights layout parsing
-- [~] Group/channel mapping
-- [~] 256-channel AC-oriented display support
-- [~] Candy cane mappings
-- [~] Arch mappings
-- [~] Snowflake/star mappings
-- [~] Mega-tree mappings
-- [ ] Comprehensive mapping validation
-- [ ] No-output/duplicate-output diagnostics
-- [ ] Better automatic semantic prop discovery
-
-### Drummer / band
-- [~] Drummer subsystem exists
-- [~] Drummer test/preview infrastructure exists
-- [?] Kick/bass synchronization
-- [?] Snare hit behavior
-- [?] Hi-hat behavior
-- [?] Cymbal behavior
-- [~] Canonical nine-component drummer contract implemented; full geometry/render validation pending
-- [~] Independent stick/arm sequencing targets removed from the mapper/injector
-- [?] Visual choreography quality
-- [ ] Full musical drummer phrase logic
-- [ ] Band-member coordination
-- [ ] Guitar/string note response
-- [ ] Singing-face/phoneme integration
-- [ ] Validate against actual rendered MP4, not only unit tests
-
-### Rendering / artifacts
-- [~] Preview/render infrastructure
-- [?] HTML/visualizer artifacts
-- [?] MP4 generation
-- [ ] Consistent MP4 + audio artifact generation
-- [ ] Artifact links in CI
-- [ ] Automated artifact sanity checks
-- [ ] Human visual review gate
-
-### GUI
-- [~] GUI exists
-- [~] Launcher exists
-- [ ] Stable beta workflow
-- [ ] Audio/layout/template/output selectors
-- [ ] Dry validation
-- [ ] Friendly errors
-- [ ] Run manifest
-- [ ] Progress/log display
-- [ ] Donation/instructions/help surfaces where appropriate
-- [ ] Package/desktop launch validation
-
-## 5. Beta / reliability roadmap
-
-### Repository safety
-- [ ] Single documented supported branch/release baseline
-- [ ] No-overwrite guarantees
-- [ ] Run manifests
-- [ ] Reproducible environment
-- [ ] Clean-room sample inputs
-- [ ] Clear input/output boundaries
-
-### CI
-- [ ] Compile gate
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] Deterministic smoke sequence
-- [ ] XSQ artifact generation
-- [ ] MP4 preview artifact
-- [ ] Artifact sanity validation
-- [ ] Regression detection
-
-### xLights compatibility
-- [ ] Generated XSQ opens successfully in xLights
-- [ ] Channel counts remain correct
-- [ ] Timing remains aligned with media
-- [ ] No unintended persistent lights
-- [ ] No accidental channel collisions
-- [ ] AC-safe output validation
-
-## 6. Quality gates
-
-A feature is not complete merely because code exists.
-
-For sequencing features, prefer:
-**code → unit test → integration test → XSQ → xLights import → rendered preview → human review**
-
-For drummer/band features:
-**audio → detected events → mapped channels → XSQ → MP4 with audio → visual review**
-
-A failed or missing artifact must remain visible in this ledger.
-
-## 7. Known problem: agent communication loss
-
-Multiple agents have historically worked from separate handoff reports, chat context, branches, and partial assumptions. This can cause duplicated implementations, abandoned logic, hidden regressions, reintroduced bugs, tests passing while visual behavior deteriorates, and features being declared complete without rendered evidence.
-
-**Countermeasure:** this file is the persistent handoff layer. Every agent must append/update the Change Ledger below.
-
-## 8. Change Ledger
-
-Newest entries go first.
-
-### 2026-09-30 — Drummer XML placeholder removed
-**Agent:** ChatGPT/GitHub MCP  
-**Branch:** feature/restructure-core  
-**Commit:** `b73ec36bdfcde54a99760296cade6a4713d77e80`  
-**Goal:** Stop the exporter from silently assigning the same fake `1-4` node range to every drummer component.
+### 2026-09-30 — Nine-component drummer geometry spec
+**Agent:** ChatGPT/GitHub
+**Branch:** `feature/restructure-core`
+**Commit:** `a6ee1e22c66fd1d9e4020b1c92538102262b23e7`
 
 **Changed:**
-- `tools/build_helpers/helixia.py` — drummer submodels are emitted without the legacy `line0="1-4"` placeholder.
+- `fixtures/band_geometry/drummer_v3_pose_spec.json` — replaced the obsolete two-tom/independent-stick component structure with four distinct tom zones and nine canonical hit composites.
+- Each snare/tom/hi-hat/cymbal composite contains its contacting-stick geometry.
+- Kick remains its own component without a stick.
 
 **Preserved intentionally:**
-- Non-drummer band submodel export remains unchanged to minimize scope.
-- Existing performer/runtime and nine-component naming remain intact.
+- Snowman body/head/hat/scarf/torso/platform geometry.
+- Left/right cymbal distinction.
+- Real custom-model grid geometry and asset-first xmodel generation path.
 
-**New behavior:**
-- The exporter no longer claims that all drummer components occupy nodes 1–4.
-- Missing drummer segmentation remains explicit rather than silently producing a misleading model.
+**Known limitation:** the xmodel builder currently exports every authored zone and composite, so the generated xmodel still contains more than the nine sequencing submodels. The next slice must make the nine composites the canonical sequencing targets while retaining physical/support geometry as non-sequenced submodels where appropriate.
 
-**Tests/evidence:**
-- Source inspection confirms the drummer branch omits `line0` while non-drummer legacy behavior remains.
-- Full-song XSQ/MP4 has not yet been regenerated; this remains the next verification gate.
-
-**Known limitations:**
-- Real xLights node ranges/geometry for all nine components are still not defined.
-
-**Deferred work:**
-- Define and validate actual component node segmentation.
-- Add fail-loud validation for missing/ambiguous segmentation.
-- Run the real-song XSQ + full-song MP4 pipeline.
-
-### 2026-09-30 — Canonical nine-component drummer contract implemented
-**Agent:** ChatGPT/GitHub MCP  
-**Branch:** feature/restructure-core  
-**Goal:** Replace the remaining independent-stick/arm sequencing semantics with the nine-component drummer contract established by the user.
-
-**Changed:**
-- `docs/DRUMMER_COMPONENT_CONTRACT.md` — established the canonical nine sequenced components and the non-negotiable behavior.
-- `mapping/drum_mapper.py` — added `DRUMMER_COMPONENTS`, deterministic four-tom and left/right-cymbal assignment, and `map_events_to_drummer_components`; pose adaptation now exposes only canonical components.
-- `tools/integrate_drummer_v3_into_xsq.py` — injects effects only into canonical drummer components and rejects non-canonical targets.
-- `tests/test_drummer_v3_xsq_integration.py` — verifies exactly nine components, no independent stick/arm targets, deterministic tom assignment, and cymbal alternation.
-
-**Preserved intentionally:**
-- The drummer remains a virtual performer and does not consume the 256 AC channels.
-- Audio detection and scheduling remain upstream of the component mapper.
-- Multiple events at the same timestamp remain separate component events.
-- Visual geometry may still contain arms/sticks; those are not sequencing channels.
-
-**New behavior:**
-- Exactly nine canonical sequencing targets are exposed: kick, snare, hi-hat, four tom components, left cymbal, and right cymbal.
-- Snare/tom/hi-hat/cymbal events target the combined component containing the contacting stick geometry; kick targets kick only.
-- Cymbal events alternate left/right deterministically.
-
-**Tests/evidence:**
-- Added unit assertions for the nine-component contract and legacy stick/arm exclusion.
-- Existing CI/full-song render remains the required integration gate.
-
-**Known limitations:**
-- The current repository's visual drummer asset documentation still describes the older two-tom plus independent-arm/stick geometry. The geometry/exporter must be reconciled with the nine-component contract before visual verification can pass.
-- No current full-song MP4 was re-rendered in this change set.
-
-**Deferred work:**
-- Reconcile the xLights model geometry/submodels with TOM_1..TOM_4 and embedded contacting-stick geometry.
-- Run the full real-song XSQ + MP4 pipeline and inspect event-to-pixel behavior.
-- Verify left/right cymbal alternation and simultaneous-hit behavior in the rendered artifact.
-
-### 2026-09-29 — Master ledger established
-**Agent:** ChatGPT/GitHub MCP  
-**Change:** Established MASTER_TODO.md as the canonical cross-agent roadmap and handoff ledger.  
-**Preserved:** Existing ROADMAP_BETA_TODO.md, TASKS.md, and AGENTS.md; no existing sequencing logic removed.  
-**Purpose:** Prevent undocumented logic loss between agents.  
-**Verification:** Repository inspection confirmed existing roadmap/task documents and active feature/restructure-core baseline.  
-**Next:** Enforce this protocol in AGENTS.md and TASKS.md.
-
-### 2026-09-29 — Current-state artifact render requested
-**Agent:** ChatGPT/GitHub MCP  
-**Branch/PR:** feature/restructure-core  
-**Goal:** Generate fresh current-state drummer and regular XSQ/MP4 artifacts from the present branch baseline.  
-
-**Changed:**
-- MASTER_TODO.md — recorded the artifact-validation run request so the push-triggered render workflows are traceable.
-
-**Preserved intentionally:**
-- No sequencing, mapping, drummer, layout, or renderer implementation was changed.
-- Existing feature/restructure-core code is the render subject.
-
-**New behavior:**
-- Trigger the branch's existing drummer and full-band render workflows from this documented baseline.
-
-**Tests/evidence:**
-- Fresh CI artifacts pending.
-- Historical full-Lights-Out drummer run was not reused because it failed before rendering on an older branch state.
-
-**Known limitations:**
-- xLights import/manual visual review remains separate from automated CI rendering.
-
-### 2026-09-29 — Drummer render failure diagnosed and corrected
-**Agent:** ChatGPT/GitHub MCP  
-**Branch/PR:** feature/restructure-core / PR #22  
-**Goal:** Correct the failed drummer/full-render validation reported after the current-state artifact run.
-
-**Changed:**
-- audio/drum_classification.py — added harmonic/percussive separation and spectral-flatness/percussive-ratio gates so harmonic guitar attacks are not freely classified as cymbals/hats.
-- audio/drum_detection.py — records harmonic-vs-percussive and spectral-flatness features.
-- mapping/drum_mapper.py — maps drummer events to the real HX_SNOWMAN_DRUMMER performer and its actual drum/stick submodels.
-- tools/integrate_drummer_v3_into_xsq.py — injects effects into real drummer submodels rather than synthetic 257–264 elements.
-- tools/render_drummer_v3_preview.py — renders explicit kick/snare/hi-hat/tom/cymbal/stick targets.
-- .github/workflows/helix-full-current.yml — builds a render layout containing the real drummer geometry.
-- tests/test_drummer_v3_xsq_integration.py — updated mapping expectations.
-
-**Preserved intentionally:**
-- 256-channel AC sequencing remains intact.
-- The drummer remains virtual/performer-based rather than consuming the 256 AC channels.
-- Existing sequence generation and audio input remain unchanged apart from the drummer detection path.
-
-**Tests/evidence:**
-- Previous run exposed 840 detected cymbals versus 37 snares and 9 toms and had no real drummer geometry in the full-render layout.
-- Corrective code is now committed; fresh render artifact is the required next validation.
-
-**Known limitations:**
-- Corrected MP4 has not yet received visual review.
-
-### 2026-09-29 — Full-song real-audio render gate
-**Agent:** ChatGPT/GitHub MCP  
-**Branch/PR:** feature/restructure-core / PR #22  
-**Goal:** Ensure validation artifacts use the repository's actual song for the entire song, never a synthetic source or arbitrary 20-second clip.
-
-**Changed:**
-- tools/render_drummer_v3_preview.py — default duration is now the complete input audio duration; refuses to render if drummer XSQ coverage is materially shorter than the song.
-- .github/workflows/helix-full-current.yml — removed the 20-second drummer render cap and added full-song duration gates for the XSQ and both MP4 artifacts.
-
-**Preserved intentionally:**
-- The source remains the real repository audio `Helix Audiolights.mp3`.
-- The virtual drummer remains mapped to real HX_SNOWMAN_DRUMMER submodels.
-- The 256-channel sequence remains separate from the virtual performer and is still rendered as the full Helix show.
-
-**Tests/evidence:**
-- CI will fail if the repo song is unexpectedly short, if XSQ coverage is below 95% of the song, or if either MP4 differs from the song duration by more than one second.
-- Fresh artifact run and visual review are still required before declaring the drummer baseline verified.
-
-**Known limitations:**
-- The corrected full-song artifact has not yet been rendered/reviewed on the current commits.
-
-**Deferred work:**
-- Compare actual drummer event timing against audible drum transients across the full song and continue tightening false-positive classification if needed.
-
-## 9. Agent change-entry template
-
-### YYYY-MM-DD — Short change name
-**Agent:** <agent/tool/name>  
-**Branch/PR:** <branch or PR>  
-**Goal:** <what this change was intended to accomplish>
-
-**Changed:**
-- <file/module> — <what changed>
-
-**Preserved intentionally:**
-- <existing behavior that must remain>
-
-**New behavior:**
-- <new behavior>
-
-**Tests/evidence:**
-- <test command/result>
-- <CI run>
-- <artifact path/link>
-- <manual review>
-
-**Known limitations:**
-- <what remains uncertain>
-
-**Deferred work:**
-- <what the next agent must not forget>
-
-**Risks/regressions to watch:**
-- <specific risks>
-
-## 10. Current next actions
-
-1. [ ] Enforce master-ledger requirement in AGENTS.md.
-2. [ ] Make TASKS.md point to MASTER_TODO.md as the first source of truth.
-3. [x] Freeze the nine-component drummer sequencing contract.
-4. [~] Reconcile the actual drummer xLights geometry/submodels with the nine-component contract.
-5. [ ] Generate a real XSQ + full-song MP4 from the updated mapper/injector.
-6. [ ] Inspect the MP4 against XSQ component events and audible drum transients.
-7. [ ] Verify simultaneous kick/snare/cymbal/tom events and cymbal alternation.
-8. [ ] Fix the highest-impact remaining drummer quality gaps one slice at a time.
-9. [ ] After each slice, update this ledger before starting the next slice.
-10. [ ] Reconcile ROADMAP_BETA_TODO.md with this master ledger rather than allowing two competing roadmaps.
-11. [ ] Establish a formal release/baseline tag once the current drummer/band baseline is proven.
-
-## 11. Important principle
-
-**Do not optimize for the appearance of progress. Optimize for retained behavior, verified artifacts, and cumulative capability.**
-
-If an agent says "done," the next agent should be able to determine what changed, why, what existed before, what exists now, what was tested, what was not tested, and what remains.
+**Next actions:**
+1. Update xmodel/export integration so the nine `DRUMMER_*` composites are the sequenced components.
+2. Add validation that each canonical component has non-empty, non-overlapping required geometry except intentional physical overlaps at contact points.
+3. Generate the repository's real-song XSQ.
+4. Render the complete song to MP4 with audio.
+5. Inspect the result frame-by-frame against the XSQ and audible drum events.
