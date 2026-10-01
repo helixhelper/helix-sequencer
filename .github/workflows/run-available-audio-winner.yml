@@ -40,6 +40,12 @@ jobs:
           subprocess.run([ffmpeg, '-y', '-i', 'LightsOutTheme.wav', '-c:a', 'libmp3lame', '-b:a', '192k', 'LightsOutTheme.mp3'], check=True)
           PY
 
+      - name: Analyze drum detection
+        env:
+          PYTHONPATH: .
+        run: |
+          python tools/analyze_drum_detection.py LightsOutTheme.wav --output test_runs/available_audio_newest_winner/drum_detection_report.json
+
       - name: Run newest variants short test
         env:
           PYTHONPATH: .
@@ -84,9 +90,6 @@ jobs:
           final = out / f"WINNER_{winner.get('version')}_{mp4.name}"
           shutil.copy2(mp4, final)
 
-          # Second render: same XSQ/electrical truth, but with the Wadena
-          # physical geometry overlay. This is deliberately a wrapper around
-          # the stable renderer so the comparison isolates geometry changes.
           wadena_cmd = [
               sys.executable,
               'tools/render_wadena_preview.py',
