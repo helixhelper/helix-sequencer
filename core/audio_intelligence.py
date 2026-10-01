@@ -865,7 +865,7 @@ def build_stem_analysis(
         if source == "local" and shutil.which("demucs"):
             stems = None
             source = "local"
-            cache_hit = false
+            cache_hit = False
         else:
             _log(log_fn, f"Stem split: reusing cached {source} stems for {audio_path.name}.")
 
