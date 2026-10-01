@@ -92,6 +92,9 @@ class DrumDetectionTests(unittest.TestCase):
                 "centroid_hz": 250.0,
                 "low_centroid_hz": 131.0,
                 "low_flux_peak_hz": 64.6,
+                "low_flux_strength": 0.68,
+                "mid_low_flux_strength": 0.56,
+                "high_flux_strength": 0.32,
                 "spectral_spread01": 0.05,
                 "spectral_flatness": 0.0,
                 "percussive_ratio": 0.14,
@@ -108,6 +111,9 @@ class DrumDetectionTests(unittest.TestCase):
                 "centroid_hz": 265.0,
                 "low_centroid_hz": 147.0,
                 "low_flux_peak_hz": 129.2,
+                "low_flux_strength": 0.45,
+                "mid_low_flux_strength": 0.65,
+                "high_flux_strength": 0.32,
                 "spectral_spread01": 0.04,
                 "spectral_flatness": 0.0,
                 "percussive_ratio": 0.39,
@@ -121,6 +127,29 @@ class DrumDetectionTests(unittest.TestCase):
         self.assertGreater(tom_scores["tom"], 0.45)
         self.assertGreater(tom_scores["tom"], tom_scores["kick"])
 
+    def test_weak_low_band_ring_is_not_promoted_to_tom(self) -> None:
+        scores = score_drum_hit_families(
+            {
+                "low_ratio": 0.33,
+                "mid_low_ratio": 0.26,
+                "mid_ratio": 0.04,
+                "high_ratio": 0.01,
+                "centroid_hz": 720.0,
+                "low_centroid_hz": 175.0,
+                "low_flux_peak_hz": 86.1,
+                "low_flux_strength": 0.10,
+                "mid_low_flux_strength": 0.15,
+                "high_flux_strength": 0.03,
+                "spectral_spread01": 0.05,
+                "spectral_flatness": 0.0,
+                "percussive_ratio": 0.10,
+                "transient_sharpness": 0.02,
+                "decay_profile": 1.0,
+            }
+        )
+
+        self.assertLess(scores["tom"], 0.34)
+
     def test_medium_decay_broadband_hit_prefers_snare_over_cymbal(self) -> None:
         scores = score_drum_hit_families(
             {
@@ -131,6 +160,9 @@ class DrumDetectionTests(unittest.TestCase):
                 "centroid_hz": 10700.0,
                 "low_centroid_hz": 245.0,
                 "low_flux_peak_hz": 193.8,
+                "low_flux_strength": 0.12,
+                "mid_low_flux_strength": 0.18,
+                "high_flux_strength": 0.82,
                 "spectral_spread01": 0.30,
                 "spectral_flatness": 0.55,
                 "percussive_ratio": 1.0,
