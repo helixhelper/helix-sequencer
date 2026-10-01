@@ -7,7 +7,7 @@ from typing import Callable
 import librosa
 import numpy as np
 
-from audio.drum_classification import DrumClassifierThresholds, DrumEvent, classify_drum_hit, empty_drum_streams, stream_key_for_type
+from audio.drum_classification import DrumClassifierThresholds, DrumEvent, empty_drum_streams, score_drum_hit_families, stream_key_for_type
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,9 @@ class DrumDetectionConfig:
     onset_wait: int = 1
     min_gap_ms: int = 22
     low_confidence_min: float = 0.34
+    multi_hit_confidence_min: float = 0.46
+    multi_hit_score_window: float = 0.14
+    max_hits_per_onset: int = 2
     cluster_gap_ms: int = 95
     prefer_recall: bool = True
 
@@ -63,10 +66,44 @@ def _cluster_id(timestamp_ms: int, previous_ms: int | None, current_cluster: int
     return current_cluster, current_cluster
 
 
+def _select_supported_families(
+    scores: dict[str, float],
+    config: DrumDetectionConfig,
+) -> list[tuple[str, float]]:
+    """Select compatible drum families from one onset.
+
+    A single physical onset can contain multiple instruments (for example
+    kick + crash). Hi-hat and cymbal are treated as alternative high-band
+    decay interpretations so they are never emitted together for one onset.
+    """
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    if not ranked or ranked[0][1] < config.low_confidence_min:
+        return []
+
+    selected: list[tuple[str, float]] = [ranked[0]]
+    top_score = ranked[0][1]
+    high_band_selected = ranked[0][0] in {"hihat", "cymbal"}
+    for family, score in ranked[1:]:
+        if len(selected) >= max(1, int(config.max_hits_per_onset)):
+            break
+        if score < config.multi_hit_confidence_min:
+            continue
+        if (top_score - score) > config.multi_hit_score_window:
+            continue
+        if family in {"hihat", "cymbal"} and high_band_selected:
+            continue
+        selected.append((family, score))
+        if family in {"hihat", "cymbal"}:
+            high_band_selected = True
+    return selected
+
+
 def detect_drum_event_streams(
     y: np.ndarray,
     sr: int,
     config: DrumDetectionConfig = DrumDetectionConfig(),
+    *,
+    source_label: str = "drum_detection",
 ) -> dict[str, list[DrumEvent]]:
     y = np.asarray(y, dtype=np.float32).reshape(-1)
     if y.size == 0 or sr <= 0:
@@ -145,10 +182,9 @@ def detect_drum_event_streams(
             "transient_sharpness": min(1.0, sharp),
             "decay_profile": min(1.0, decay),
         }
-        drum_type, confidence = classify_drum_hit(
-            features,
-            DrumClassifierThresholds(low_confidence_min=config.low_confidence_min),
-        )
+        thresholds = DrumClassifierThresholds(low_confidence_min=config.low_confidence_min)
+        family_scores = score_drum_hit_families(features, thresholds)
+        supported = _select_supported_families(family_scores, config)
         timestamp = float(librosa.frames_to_time(frame, sr=sr, hop_length=hop))
         timestamp_ms = int(round(timestamp * 1000.0))
         cluster, cluster_id = _cluster_id(timestamp_ms, previous_ms, cluster, config.cluster_gap_ms)
@@ -160,16 +196,34 @@ def detect_drum_event_streams(
                 (float(rms01[frame]) if frame < len(rms01) else current) * 0.65 + current * 0.35,
             ),
         )
-        raw_events.append(
-            DrumEvent(
-                timestamp=round(timestamp, 4),
-                velocity=round(velocity, 3),
-                confidence=confidence,
-                frequency_band_info={key: round(float(value), 4) for key, value in features.items()},
-                cluster_id=cluster_id,
-                drum_type=drum_type,
+        evidence = {key: round(float(value), 4) for key, value in features.items()}
+        evidence.update({f"score_{name}": round(float(score), 4) for name, score in family_scores.items()})
+        evidence["family_support_count"] = float(len(supported))
+        if not supported:
+            raw_events.append(
+                DrumEvent(
+                    timestamp=round(timestamp, 4),
+                    velocity=round(velocity, 3),
+                    confidence=round(max(family_scores.values(), default=0.0), 3),
+                    frequency_band_info=evidence,
+                    cluster_id=cluster_id,
+                    drum_type="drum_bus",
+                    source=source_label,
+                )
             )
-        )
+        else:
+            for drum_type, confidence in supported:
+                raw_events.append(
+                    DrumEvent(
+                        timestamp=round(timestamp, 4),
+                        velocity=round(velocity, 3),
+                        confidence=round(float(confidence), 3),
+                        frequency_band_info=evidence,
+                        cluster_id=cluster_id,
+                        drum_type=drum_type,
+                        source=source_label,
+                    )
+                )
     streams = empty_drum_streams()
     for event in _compress_events(raw_events, config.min_gap_ms):
         streams[stream_key_for_type(event.drum_type)].append(event)
@@ -180,10 +234,17 @@ def detect_drum_event_streams_from_file(
     path: Path,
     config: DrumDetectionConfig = DrumDetectionConfig(),
     log_fn: Callable[[str], None] | None = None,
+    *,
+    source_label: str = "drum_detection",
 ) -> dict[str, list[DrumEvent]]:
     try:
         y, sr = librosa.load(str(path), sr=None, mono=True)
-        streams = detect_drum_event_streams(np.asarray(y, dtype=np.float32), int(sr), config)
+        streams = detect_drum_event_streams(
+            np.asarray(y, dtype=np.float32),
+            int(sr),
+            config,
+            source_label=source_label,
+        )
         if log_fn is not None:
             counts = {key: len(value) for key, value in streams.items()}
             log_fn(f"Drum intelligence: {counts}")
