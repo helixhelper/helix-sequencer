@@ -13,10 +13,11 @@ from mapping.drum_mapper import DRUMMER_COMPONENTS, map_events_to_drummer_compon
 LEGACY_STICK_OR_ARM_TOKENS = ("LEFT_STICK", "RIGHT_STICK", "LEFT_ARM", "RIGHT_ARM")
 
 
-def test_canonical_drummer_has_exactly_nine_components() -> None:
-    assert len(DRUMMER_COMPONENTS) == 9
-    assert len(set(DRUMMER_COMPONENTS)) == 9
-    assert all("STICK" not in name and "ARM" not in name for name in DRUMMER_COMPONENTS)
+def test_canonical_drummer_has_approved_eight_hit_composites() -> None:
+    assert len(DRUMMER_COMPONENTS) == 8
+    assert len(set(DRUMMER_COMPONENTS)) == 8
+    assert "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR" in DRUMMER_COMPONENTS
+    assert not any("TOM_4" in name for name in DRUMMER_COMPONENTS)
 
 
 def test_component_mapper_never_emits_independent_sticks_or_arms() -> None:
@@ -27,26 +28,24 @@ def test_component_mapper_never_emits_independent_sticks_or_arms() -> None:
         DrumEvent(0.4, 0.7, 0.7, {}, 4, "tom"),
         DrumEvent(0.5, 0.7, 0.7, {}, 5, "tom"),
         DrumEvent(0.6, 0.7, 0.7, {}, 6, "tom"),
-        DrumEvent(0.7, 0.7, 0.7, {}, 7, "tom"),
-        DrumEvent(0.8, 1.0, 0.8, {}, 8, "cymbal"),
-        DrumEvent(0.9, 0.8, 0.8, {}, 9, "cymbal"),
+        DrumEvent(0.7, 1.0, 0.8, {}, 7, "cymbal"),
+        DrumEvent(0.8, 0.8, 0.8, {}, 8, "cymbal"),
     ]
     mapped = map_events_to_drummer_components(events)
     components = [str(item["component"]) for item in mapped]
     assert set(components).issubset(set(DRUMMER_COMPONENTS))
     assert not any(any(token in component for token in LEGACY_STICK_OR_ARM_TOKENS) for component in components)
-    assert components[0] == "HX_SNOWMAN_DRUMMER_KICK"
-    assert components[1] == "HX_SNOWMAN_DRUMMER_SNARE"
-    assert components[2] == "HX_SNOWMAN_DRUMMER_HI_HAT"
-    assert components[3:7] == [
-        "HX_SNOWMAN_DRUMMER_TOM_1",
-        "HX_SNOWMAN_DRUMMER_TOM_2",
-        "HX_SNOWMAN_DRUMMER_TOM_3",
-        "HX_SNOWMAN_DRUMMER_TOM_4",
+    assert components[0] == "HX_SNOWMAN_DRUMMER_HIT_KICK"
+    assert components[1] == "HX_SNOWMAN_DRUMMER_HIT_SNARE"
+    assert components[2] == "HX_SNOWMAN_DRUMMER_HIT_HI_HAT"
+    assert components[3:6] == [
+        "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT",
+        "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT",
+        "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR",
     ]
-    assert components[7:9] == [
-        "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT",
-        "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT",
+    assert components[6:8] == [
+        "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT",
+        "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT",
     ]
 
 
@@ -114,7 +113,7 @@ def test_injector_uses_production_stem_analysis_path() -> None:
         assert report["detector_counts"]["kick_events"] == 1
         assert report["placement_count"] == 1
         tree = ET.parse(output)
-        effects = tree.findall(".//Element[@name='HX_SNOWMAN_DRUMMER_KICK']/EffectLayer/Effect")
+        effects = tree.findall(".//Element[@name='HX_SNOWMAN_DRUMMER_HIT_KICK']/EffectLayer/Effect")
         assert len(effects) == 1
         assert effects[0].get("sourceDrumType") == "kick"
 
