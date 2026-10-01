@@ -7,8 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from core.audio_intelligence import build_stem_analysis
-from mapping.drum_mapper import DRUMMER_COMPONENTS, map_events_to_drummer_components, resolve_drum_streams
-
+from audio.drum_detection_oracle import (\n    APPROVED_DRUMMER_BEHAVIOR_PROFILE,\n    detect_drum_event_streams_from_file_oracle,\n)\nfrom mapping.drum_mapper import DRUMMER_COMPONENTS, map_events_to_drummer_components, resolve_drum_streams\n
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER"
 DRUMMER_TARGETS = set(DRUMMER_COMPONENTS)
 
