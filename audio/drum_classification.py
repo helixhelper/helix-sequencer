@@ -60,6 +60,10 @@ def score_drum_hit_families(
     centroid = float(features.get("centroid_hz", 0) or 0)
     low_centroid = float(features.get("low_centroid_hz", centroid) or centroid)
     low_flux_peak = float(features.get("low_flux_peak_hz", 0.0) or 0.0)
+    low_flux_strength = _clamp(features.get("low_flux_strength", 0.0))
+    mid_low_flux_strength = _clamp(features.get("mid_low_flux_strength", 0.0))
+    high_flux_strength = _clamp(features.get("high_flux_strength", 0.0))
+    band_flux_strength = max(low_flux_strength, mid_low_flux_strength)
     spread = _clamp(features.get("spectral_spread01", 0))
     sharp = _clamp(features.get("transient_sharpness", 0))
     decay = _clamp(features.get("decay_profile", 0))
@@ -100,7 +104,13 @@ def score_drum_hit_families(
     medium_decay = max(0.0, 1.0 - (abs(decay - 0.55) / 0.50))
 
     scores = {
-        "kick": (low * .55) + ((1 - min(1, low_centroid / 1200)) * .25) + (sharp * .20) + (kick_peak_support * .18),
+        "kick": (
+            (low * .55)
+            + ((1 - min(1, low_centroid / 1200)) * .25)
+            + (sharp * .20)
+            + (kick_peak_support * .18)
+            + (low_flux_strength * .25)
+        ),
         "snare": (
             (mid * .42)
             + (sharp * .32)
@@ -117,12 +127,15 @@ def score_drum_hit_families(
             + (decay * .16)
             + (sharp * .14)
             + (tom_peak_support * .28)
+            + (band_flux_strength * .22)
         ),
         "hihat": (high * .48) + (sharp * .24) + ((1 - decay) * .14) + (percussive_ratio * .14),
         "cymbal": (high * .34) + (decay * .24) + (spread * .12) + (percussive_ratio * .20) + (flatness * .10),
     }
 
-    if low < thresholds.kick_low_ratio_min:
+    if low < thresholds.kick_low_ratio_min and not (
+        35.0 <= low_flux_peak <= 75.0 and low_flux_strength >= 0.20
+    ):
         scores["kick"] *= .78
     if low_flux_peak > 78.0:
         scores["kick"] *= .55
@@ -132,6 +145,8 @@ def score_drum_hit_families(
         scores["tom"] *= .76
     if 0.0 < low_flux_peak < 75.0:
         scores["tom"] *= .65
+    if band_flux_strength < 0.22:
+        scores["tom"] *= .55
     if high < thresholds.hihat_high_ratio_min:
         scores["hihat"] *= .72
     if decay > thresholds.hihat_decay_max:
@@ -143,6 +158,8 @@ def score_drum_hit_families(
         or flatness < thresholds.cymbal_flatness_min
     ):
         scores["cymbal"] *= .60
+    if high_flux_strength > 0.0 and high_flux_strength < 0.40:
+        scores["cymbal"] *= .48
 
     return {name: round(_clamp(score), 3) for name, score in scores.items()}
 
