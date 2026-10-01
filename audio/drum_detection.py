@@ -237,6 +237,7 @@ def detect_drum_event_streams(
     )
     low_flux_env = _band_flux_envelope(original_stft, freqs, 20.0, 220.0)
     mid_low_flux_env = _band_flux_envelope(original_stft, freqs, 120.0, 700.0)
+    high_flux_env = _band_flux_envelope(original_stft, freqs, 2500.0, min(sr / 2, 14000.0))
     low_flux_frames = _peak_frames(
         low_flux_env,
         delta=config.band_flux_delta,
@@ -307,6 +308,9 @@ def detect_drum_event_streams(
             for offset in range(-config.detector_tolerance_frames, config.detector_tolerance_frames + 1)
         ) else 0.0
         low_flux_peak = _low_flux_peak_hz(original_stft, freqs, frame)
+        low_flux_strength = float(low_flux_env[frame]) if frame < len(low_flux_env) else 0.0
+        mid_low_flux_strength = float(mid_low_flux_env[frame]) if frame < len(mid_low_flux_env) else 0.0
+        high_flux_strength = float(high_flux_env[frame]) if frame < len(high_flux_env) else 0.0
         features = {
             "low_ratio": low / total,
             "mid_low_ratio": mid_low / total,
@@ -315,6 +319,9 @@ def detect_drum_event_streams(
             "centroid_hz": centroid,
             "low_centroid_hz": low_centroid,
             "low_flux_peak_hz": low_flux_peak,
+            "low_flux_strength": low_flux_strength,
+            "mid_low_flux_strength": mid_low_flux_strength,
+            "high_flux_strength": high_flux_strength,
             "spectral_spread01": min(1.0, spread / max(1.0, sr / 2)),
             "spectral_flatness": min(1.0, flatness),
             "percussive_ratio": min(1.0, percussive_ratio),
