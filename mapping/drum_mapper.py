@@ -18,42 +18,55 @@ DRUM_SUBMODEL_BY_TYPE = {
 DRUM_PRIORITY = {"kick": 0, "snare": 1, "cymbal": 2, "tom": 3, "hihat": 4, "drum_bus": 5}
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER"
 
-# Canonical sequenced drummer components. Arms/sticks remain geometry inside these
-# components; they are never independent sequencing channels.
+# Canonical sequenced drummer hit composites. These are the only production
+# sequencing targets. Contact geometry is embedded in each composite:
+# kick = drum only, hi-hat = cymbal + foot/pedal, all other struck instruments
+# = instrument + the appropriate arm/stick.
 DRUMMER_COMPONENTS = (
-    "HX_SNOWMAN_DRUMMER_KICK",
-    "HX_SNOWMAN_DRUMMER_SNARE",
-    "HX_SNOWMAN_DRUMMER_HI_HAT",
-    "HX_SNOWMAN_DRUMMER_TOM_1",
-    "HX_SNOWMAN_DRUMMER_TOM_2",
-    "HX_SNOWMAN_DRUMMER_TOM_3",
-    "HX_SNOWMAN_DRUMMER_TOM_4",
-    "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT",
-    "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT",
+    "HX_SNOWMAN_DRUMMER_HIT_KICK",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE",
+    "HX_SNOWMAN_DRUMMER_HIT_HI_HAT",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT",
 )
+
+DRUMMER_POSE_BY_COMPONENT = {
+    "HX_SNOWMAN_DRUMMER_HIT_KICK": "kick_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE": "snare_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_HI_HAT": "hi_hat_pulse",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT": "left_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT": "right_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR": "floor_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT": "left_crash",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": "right_crash",
+}
 
 DRUMMER_V3_POSE_BY_TYPE = {
     "kick": "kick_hit",
     "snare": "snare_hit",
     "hihat": "hi_hat_pulse",
-    "tom": "tom_hit",
-    "cymbal": "cymbal_hit",
+    "tom": "left_tom_hit",
+    "cymbal": "left_crash",
     "drum_bus": "downbeat_impact",
 }
 
-# Poses resolve to sequenced components only. Contacting-stick geometry is part
-# of the target component and must not become a separate target.
 DRUMMER_V3_SUBMODELS_BY_POSE = {
     "idle_ready": (),
-    "kick_hit": ("HX_SNOWMAN_DRUMMER_KICK",),
-    "snare_hit": ("HX_SNOWMAN_DRUMMER_SNARE",),
-    "hi_hat_pulse": ("HX_SNOWMAN_DRUMMER_HI_HAT",),
-    "tom_hit": ("HX_SNOWMAN_DRUMMER_TOM_1",),
-    "cymbal_hit": ("HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT",),
+    "kick_hit": ("HX_SNOWMAN_DRUMMER_HIT_KICK",),
+    "snare_hit": ("HX_SNOWMAN_DRUMMER_HIT_SNARE",),
+    "hi_hat_pulse": ("HX_SNOWMAN_DRUMMER_HIT_HI_HAT",),
+    "left_tom_hit": ("HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT",),
+    "right_tom_hit": ("HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT",),
+    "floor_tom_hit": ("HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR",),
+    "left_crash": ("HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT",),
+    "right_crash": ("HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT",),
     "downbeat_impact": (
-        "HX_SNOWMAN_DRUMMER_KICK",
-        "HX_SNOWMAN_DRUMMER_SNARE",
-        "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT",
+        "HX_SNOWMAN_DRUMMER_HIT_KICK",
+        "HX_SNOWMAN_DRUMMER_HIT_SNARE",
+        "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT",
     ),
 }
 
@@ -61,8 +74,11 @@ DRUMMER_V3_DURATION_BY_POSE = {
     "kick_hit": 150,
     "snare_hit": 125,
     "hi_hat_pulse": 80,
-    "tom_hit": 155,
-    "cymbal_hit": 320,
+    "left_tom_hit": 155,
+    "right_tom_hit": 155,
+    "floor_tom_hit": 175,
+    "left_crash": 320,
+    "right_crash": 320,
     "downbeat_impact": 220,
 }
 
@@ -132,10 +148,11 @@ def map_events_to_submodels(events: Iterable[DrumEvent]) -> list[dict[str, objec
 
 
 def drummer_component_for_event(event: DrumEvent, *, event_index: int = 0) -> str:
-    """Return exactly one canonical nine-component target for a drum event.
+    """Return one approved physical hit composite for a detected drum event.
 
-    Generic toms rotate deterministically across four tom components. Cymbals
-    alternate left/right. No arm or stick target is ever emitted.
+    Generic toms rotate left -> right -> floor. Cymbals alternate left/right.
+    Kick contains no stick; hi-hat contains pedal/foot geometry instead of a
+    stick; every other struck drum/cymbal includes its appropriate arm/stick.
     """
     if event.drum_type == "kick":
         return DRUMMER_COMPONENTS[0]
@@ -144,14 +161,14 @@ def drummer_component_for_event(event: DrumEvent, *, event_index: int = 0) -> st
     if event.drum_type == "hihat":
         return DRUMMER_COMPONENTS[2]
     if event.drum_type == "tom":
-        return DRUMMER_COMPONENTS[3 + (event_index % 4)]
+        return DRUMMER_COMPONENTS[3 + (event_index % 3)]
     if event.drum_type == "cymbal":
-        return DRUMMER_COMPONENTS[7 + (event_index % 2)]
+        return DRUMMER_COMPONENTS[6 + (event_index % 2)]
     return DRUMMER_COMPONENTS[0]
 
 
 def map_events_to_drummer_components(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
-    """Map detected events to the canonical nine-component drummer contract."""
+    """Map detected events to the approved eight-hit drummer contract."""
     mapped: list[dict[str, object]] = []
     tom_index = 0
     cymbal_index = 0
@@ -166,7 +183,7 @@ def map_events_to_drummer_components(events: Iterable[DrumEvent]) -> list[dict[s
             component = drummer_component_for_event(event)
         mapped.append({
             "timestamp_ms": event.timestamp_ms,
-            "end_ms": event.timestamp_ms + DRUMMER_V3_DURATION_BY_POSE.get(DRUMMER_V3_POSE_BY_TYPE.get(event.drum_type, "kick_hit"), 140),
+            "end_ms": event.timestamp_ms + DRUMMER_V3_DURATION_BY_POSE.get(DRUMMER_POSE_BY_COMPONENT.get(component, "kick_hit"), 140),
             "model": DRUMMER_V3_MODEL,
             "drum_type": event.drum_type,
             "component": component,
@@ -178,14 +195,15 @@ def map_events_to_drummer_components(events: Iterable[DrumEvent]) -> list[dict[s
 
 
 def drummer_v3_pose_for_event(event: DrumEvent, event_index: int = 0) -> str:
-    return DRUMMER_V3_POSE_BY_TYPE.get(event.drum_type, "downbeat_impact")
+    component = drummer_component_for_event(event, event_index=event_index)
+    return DRUMMER_POSE_BY_COMPONENT.get(component, "downbeat_impact")
 
 
 def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
     mapped: list[dict[str, object]] = []
     component_events = map_events_to_drummer_components(events)
     for item in component_events:
-        pose = DRUMMER_V3_POSE_BY_TYPE.get(str(item["drum_type"]), "downbeat_impact")
+        pose = DRUMMER_POSE_BY_COMPONENT.get(str(item["component"]), "downbeat_impact")
         mapped.append({
             "timestamp_ms": item["timestamp_ms"],
             "end_ms": item["end_ms"],
