@@ -146,8 +146,8 @@ def score_drum_hit_families(
         scores["tom"] *= .76
     if 0.0 < low_flux_peak < 75.0:
         scores["tom"] *= .65
-    if band_flux_strength < 0.22:
-        scores["tom"] *= .55
+    if band_flux_strength < 0.30:
+        scores["tom"] *= .45
     if high < thresholds.hihat_high_ratio_min:
         scores["hihat"] *= .72
     if decay > thresholds.hihat_decay_max:
