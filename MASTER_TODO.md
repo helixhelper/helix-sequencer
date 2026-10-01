@@ -174,6 +174,35 @@ Multiple agents have historically worked from separate handoff reports, chat con
 
 Newest entries go first.
 
+### 2026-09-30 — Drummer XML placeholder removed
+**Agent:** ChatGPT/GitHub MCP  
+**Branch:** feature/restructure-core  
+**Commit:** `b73ec36bdfcde54a99760296cade6a4713d77e80`  
+**Goal:** Stop the exporter from silently assigning the same fake `1-4` node range to every drummer component.
+
+**Changed:**
+- `tools/build_helpers/helixia.py` — drummer submodels are emitted without the legacy `line0="1-4"` placeholder.
+
+**Preserved intentionally:**
+- Non-drummer band submodel export remains unchanged to minimize scope.
+- Existing performer/runtime and nine-component naming remain intact.
+
+**New behavior:**
+- The exporter no longer claims that all drummer components occupy nodes 1–4.
+- Missing drummer segmentation remains explicit rather than silently producing a misleading model.
+
+**Tests/evidence:**
+- Source inspection confirms the drummer branch omits `line0` while non-drummer legacy behavior remains.
+- Full-song XSQ/MP4 has not yet been regenerated; this remains the next verification gate.
+
+**Known limitations:**
+- Real xLights node ranges/geometry for all nine components are still not defined.
+
+**Deferred work:**
+- Define and validate actual component node segmentation.
+- Add fail-loud validation for missing/ambiguous segmentation.
+- Run the real-song XSQ + full-song MP4 pipeline.
+
 ### 2026-09-30 — Canonical nine-component drummer contract implemented
 **Agent:** ChatGPT/GitHub MCP  
 **Branch:** feature/restructure-core  
