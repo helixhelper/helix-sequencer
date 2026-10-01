@@ -82,6 +82,66 @@ class DrumDetectionTests(unittest.TestCase):
         self.assertGreater(tom_conf, 0.4)
         self.assertGreater(cymbal_conf, 0.4)
 
+    def test_tonal_kick_and_tom_survive_hpss_harmonic_contamination(self) -> None:
+        kick_scores = score_drum_hit_families(
+            {
+                "low_ratio": 0.64,
+                "mid_low_ratio": 0.19,
+                "mid_ratio": 0.04,
+                "high_ratio": 0.01,
+                "centroid_hz": 250.0,
+                "low_centroid_hz": 131.0,
+                "low_flux_peak_hz": 64.6,
+                "spectral_spread01": 0.05,
+                "spectral_flatness": 0.0,
+                "percussive_ratio": 0.14,
+                "transient_sharpness": 0.22,
+                "decay_profile": 0.01,
+            }
+        )
+        tom_scores = score_drum_hit_families(
+            {
+                "low_ratio": 0.81,
+                "mid_low_ratio": 0.24,
+                "mid_ratio": 0.03,
+                "high_ratio": 0.01,
+                "centroid_hz": 265.0,
+                "low_centroid_hz": 147.0,
+                "low_flux_peak_hz": 129.2,
+                "spectral_spread01": 0.04,
+                "spectral_flatness": 0.0,
+                "percussive_ratio": 0.39,
+                "transient_sharpness": 0.17,
+                "decay_profile": 0.01,
+            }
+        )
+
+        self.assertGreater(kick_scores["kick"], 0.5)
+        self.assertGreater(kick_scores["kick"], kick_scores["tom"])
+        self.assertGreater(tom_scores["tom"], 0.45)
+        self.assertGreater(tom_scores["tom"], tom_scores["kick"])
+
+    def test_medium_decay_broadband_hit_prefers_snare_over_cymbal(self) -> None:
+        scores = score_drum_hit_families(
+            {
+                "low_ratio": 0.03,
+                "mid_low_ratio": 0.03,
+                "mid_ratio": 0.08,
+                "high_ratio": 0.52,
+                "centroid_hz": 10700.0,
+                "low_centroid_hz": 245.0,
+                "low_flux_peak_hz": 193.8,
+                "spectral_spread01": 0.30,
+                "spectral_flatness": 0.55,
+                "percussive_ratio": 1.0,
+                "transient_sharpness": 0.02,
+                "decay_profile": 0.62,
+            }
+        )
+
+        self.assertGreater(scores["snare"], 0.34)
+        self.assertGreater(scores["snare"], scores["cymbal"])
+
     def test_parallel_family_evidence_preserves_kick_plus_cymbal(self) -> None:
         features = {
             "low_ratio": 0.38,
@@ -92,7 +152,7 @@ class DrumDetectionTests(unittest.TestCase):
             "low_centroid_hz": 200.0,
             "spectral_spread01": 0.70,
             "transient_sharpness": 0.70,
-            "decay_profile": 0.65,
+            "decay_profile": 0.75,
             "percussive_ratio": 0.75,
             "spectral_flatness": 0.10,
         }
