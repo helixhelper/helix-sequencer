@@ -5,8 +5,8 @@ import unittest
 
 import numpy as np
 
-from audio.drum_classification import classify_drum_hit
-from audio.drum_detection import DrumDetectionConfig, detect_drum_event_streams
+from audio.drum_classification import classify_drum_hit, score_drum_hit_families
+from audio.drum_detection import DrumDetectionConfig, _select_supported_families, detect_drum_event_streams
 
 
 class DrumDetectionTests(unittest.TestCase):
@@ -82,6 +82,35 @@ class DrumDetectionTests(unittest.TestCase):
         self.assertGreater(tom_conf, 0.4)
         self.assertGreater(cymbal_conf, 0.4)
 
+    def test_parallel_family_evidence_preserves_kick_plus_cymbal(self) -> None:
+        features = {
+            "low_ratio": 0.38,
+            "mid_low_ratio": 0.10,
+            "mid_ratio": 0.10,
+            "high_ratio": 0.42,
+            "centroid_hz": 4500.0,
+            "low_centroid_hz": 200.0,
+            "spectral_spread01": 0.70,
+            "transient_sharpness": 0.70,
+            "decay_profile": 0.65,
+            "percussive_ratio": 0.75,
+            "spectral_flatness": 0.10,
+        }
+        scores = score_drum_hit_families(features)
+        selected = _select_supported_families(
+            scores,
+            DrumDetectionConfig(
+                multi_hit_confidence_min=0.46,
+                multi_hit_score_window=0.14,
+                max_hits_per_onset=2,
+            ),
+        )
+
+        self.assertEqual({name for name, _ in selected}, {"kick", "cymbal"})
+        self.assertGreater(scores["kick"], 0.5)
+        self.assertGreater(scores["cymbal"], 0.5)
+        self.assertLess(scores["hihat"], scores["cymbal"])
+
     def test_synthetic_percussive_signal_produces_events(self) -> None:
         sr = 22050
         y = np.zeros(sr, dtype=np.float32)
@@ -91,10 +120,19 @@ class DrumDetectionTests(unittest.TestCase):
             t = np.arange(length) / sr
             burst = np.sin(2 * math.pi * freq * t) * np.exp(-t * 35)
             y[idx : idx + length] += burst.astype(np.float32)
-        streams = detect_drum_event_streams(y, sr, DrumDetectionConfig(onset_delta=0.025, min_gap_ms=12))
+        streams = detect_drum_event_streams(
+            y,
+            sr,
+            DrumDetectionConfig(onset_delta=0.025, min_gap_ms=12),
+            source_label="demucs:drums",
+        )
         total = sum(len(events) for events in streams.values())
         self.assertGreaterEqual(total, 2)
         self.assertTrue(any(streams[key] for key in ("kick_events", "snare_events", "hihat_events", "drum_bus_events")))
+        flattened = [event for events in streams.values() for event in events]
+        self.assertTrue(flattened)
+        self.assertTrue(all(event.source == "demucs:drums" for event in flattened))
+        self.assertTrue(all("score_kick" in event.frequency_band_info for event in flattened))
 
 
 if __name__ == "__main__":
