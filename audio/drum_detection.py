@@ -20,6 +20,7 @@ class DrumDetectionConfig:
     multi_hit_score_window: float = 0.14
     max_hits_per_onset: int = 2
     spectral_flux_delta: float = 0.05
+    band_flux_delta: float = 0.03
     detector_tolerance_frames: int = 1
     cluster_gap_ms: int = 95
     prefer_recall: bool = True
@@ -78,6 +79,65 @@ def _spectral_flux_envelope(stft: np.ndarray) -> np.ndarray:
         positive_delta = np.maximum(0.0, matrix[:, 1:] - matrix[:, :-1])
         flux[1:] = np.sum(positive_delta, axis=0)
     return _norm01(flux)
+
+
+def _band_flux_envelope(
+    stft: np.ndarray,
+    freqs: np.ndarray,
+    low_hz: float,
+    high_hz: float,
+) -> np.ndarray:
+    """Return normalized positive spectral flux for one frequency band."""
+    matrix = np.asarray(stft, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[1] == 0:
+        return np.asarray([], dtype=float)
+    mask = (freqs >= float(low_hz)) & (freqs < float(high_hz))
+    if not np.any(mask):
+        return np.zeros(matrix.shape[1], dtype=float)
+    band = matrix[mask, :]
+    flux = np.zeros(matrix.shape[1], dtype=float)
+    if matrix.shape[1] > 1:
+        flux[1:] = np.sum(np.maximum(0.0, band[:, 1:] - band[:, :-1]), axis=0)
+    return _norm01(flux)
+
+
+def _peak_frames(envelope: np.ndarray, *, delta: float, wait: int) -> np.ndarray:
+    if envelope.size == 0:
+        return np.asarray([], dtype=int)
+    return np.asarray(
+        librosa.util.peak_pick(
+            envelope,
+            pre_max=1,
+            post_max=1,
+            pre_avg=2,
+            post_avg=2,
+            delta=max(0.0, float(delta)),
+            wait=max(1, int(wait)),
+        ),
+        dtype=int,
+    )
+
+
+def _low_flux_peak_hz(
+    original_stft: np.ndarray,
+    freqs: np.ndarray,
+    frame: int,
+) -> float:
+    """Estimate the newly arriving low-frequency resonance at one frame."""
+    if original_stft.ndim != 2 or frame < 0 or frame >= original_stft.shape[1]:
+        return 0.0
+    current = original_stft[:, frame]
+    if frame > 0:
+        delta = np.maximum(0.0, current - original_stft[:, frame - 1])
+    else:
+        delta = current
+    mask = (freqs >= 35.0) & (freqs <= 350.0)
+    if not np.any(mask):
+        return 0.0
+    band = delta[mask]
+    if band.size == 0 or float(np.max(band)) <= 1e-9:
+        return 0.0
+    return float(freqs[mask][int(np.argmax(band))])
 
 
 def _detector_votes(
@@ -166,26 +226,39 @@ def detect_drum_event_streams(
         onset_frames = np.asarray(peaks, dtype=int)
 
     stft = np.abs(librosa.stft(perc, n_fft=n_fft, hop_length=hop))
+    original_stft = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop))
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+
     spectral_flux_env = _spectral_flux_envelope(stft)
-    spectral_flux_frames = np.asarray([], dtype=int)
-    if spectral_flux_env.size:
-        spectral_flux_frames = np.asarray(
-            librosa.util.peak_pick(
-                spectral_flux_env,
-                pre_max=1,
-                post_max=1,
-                pre_avg=2,
-                post_avg=2,
-                delta=max(0.0, float(config.spectral_flux_delta)),
-                wait=max(1, config.onset_wait),
-            ),
-            dtype=int,
-        )
+    spectral_flux_frames = _peak_frames(
+        spectral_flux_env,
+        delta=config.spectral_flux_delta,
+        wait=config.onset_wait,
+    )
+    low_flux_env = _band_flux_envelope(original_stft, freqs, 20.0, 220.0)
+    mid_low_flux_env = _band_flux_envelope(original_stft, freqs, 120.0, 700.0)
+    low_flux_frames = _peak_frames(
+        low_flux_env,
+        delta=config.band_flux_delta,
+        wait=config.onset_wait,
+    )
+    mid_low_flux_frames = _peak_frames(
+        mid_low_flux_env,
+        delta=config.band_flux_delta,
+        wait=config.onset_wait,
+    )
+
     onset_frame_set = {int(frame) for frame in onset_frames}
     spectral_flux_frame_set = {int(frame) for frame in spectral_flux_frames}
-    frames = sorted(onset_frame_set | spectral_flux_frame_set)
+    low_flux_frame_set = {int(frame) for frame in low_flux_frames}
+    mid_low_flux_frame_set = {int(frame) for frame in mid_low_flux_frames}
+    frames = sorted(
+        onset_frame_set
+        | spectral_flux_frame_set
+        | low_flux_frame_set
+        | mid_low_flux_frame_set
+    )
     harmonic_rms = librosa.feature.rms(y=harmonic, hop_length=hop)[0]
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
     rms = librosa.feature.rms(y=perc, hop_length=hop)[0]
     rms01 = _norm01(rms)
     onset01 = _norm01(onset_env)
@@ -225,6 +298,15 @@ def detect_drum_event_streams(
             spectral_flux_frame_set,
             config.detector_tolerance_frames,
         )
+        low_flux_vote = 1.0 if any(
+            (frame + offset) in low_flux_frame_set
+            for offset in range(-config.detector_tolerance_frames, config.detector_tolerance_frames + 1)
+        ) else 0.0
+        mid_low_flux_vote = 1.0 if any(
+            (frame + offset) in mid_low_flux_frame_set
+            for offset in range(-config.detector_tolerance_frames, config.detector_tolerance_frames + 1)
+        ) else 0.0
+        low_flux_peak = _low_flux_peak_hz(original_stft, freqs, frame)
         features = {
             "low_ratio": low / total,
             "mid_low_ratio": mid_low / total,
@@ -232,6 +314,7 @@ def detect_drum_event_streams(
             "high_ratio": high / total,
             "centroid_hz": centroid,
             "low_centroid_hz": low_centroid,
+            "low_flux_peak_hz": low_flux_peak,
             "spectral_spread01": min(1.0, spread / max(1.0, sr / 2)),
             "spectral_flatness": min(1.0, flatness),
             "percussive_ratio": min(1.0, percussive_ratio),
@@ -239,6 +322,9 @@ def detect_drum_event_streams(
             "decay_profile": min(1.0, decay),
             "detector_onset": onset_vote,
             "detector_spectral_flux": spectral_flux_vote,
+            "detector_low_flux": low_flux_vote,
+            "detector_mid_low_flux": mid_low_flux_vote,
+            "detector_band_flux_count": low_flux_vote + mid_low_flux_vote,
             "detector_agreement": detector_agreement,
         }
         thresholds = DrumClassifierThresholds(low_confidence_min=config.low_confidence_min)
