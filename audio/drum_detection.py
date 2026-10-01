@@ -19,6 +19,8 @@ class DrumDetectionConfig:
     multi_hit_confidence_min: float = 0.46
     multi_hit_score_window: float = 0.14
     max_hits_per_onset: int = 2
+    spectral_flux_delta: float = 0.05
+    detector_tolerance_frames: int = 1
     cluster_gap_ms: int = 95
     prefer_recall: bool = True
 
@@ -64,6 +66,35 @@ def _cluster_id(timestamp_ms: int, previous_ms: int | None, current_cluster: int
     if previous_ms is None or timestamp_ms - previous_ms > gap_ms:
         current_cluster += 1
     return current_cluster, current_cluster
+
+
+def _spectral_flux_envelope(stft: np.ndarray) -> np.ndarray:
+    """Return normalized positive spectral flux for an STFT magnitude matrix."""
+    matrix = np.asarray(stft, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[1] == 0:
+        return np.asarray([], dtype=float)
+    flux = np.zeros(matrix.shape[1], dtype=float)
+    if matrix.shape[1] > 1:
+        positive_delta = np.maximum(0.0, matrix[:, 1:] - matrix[:, :-1])
+        flux[1:] = np.sum(positive_delta, axis=0)
+    return _norm01(flux)
+
+
+def _detector_votes(
+    frame: int,
+    onset_frames: set[int],
+    spectral_flux_frames: set[int],
+    tolerance_frames: int,
+) -> tuple[float, float, float]:
+    """Return onset, spectral-flux and agreement evidence for one candidate."""
+    tolerance = max(0, int(tolerance_frames))
+
+    def nearby(candidates: set[int]) -> float:
+        return 1.0 if any((frame + offset) in candidates for offset in range(-tolerance, tolerance + 1)) else 0.0
+
+    onset_vote = nearby(onset_frames)
+    spectral_flux_vote = nearby(spectral_flux_frames)
+    return onset_vote, spectral_flux_vote, onset_vote + spectral_flux_vote
 
 
 def _select_supported_families(
@@ -114,7 +145,7 @@ def detect_drum_event_streams(
     onset_env = librosa.onset.onset_strength(y=perc, sr=sr, hop_length=hop)
     if onset_env.size == 0:
         return empty_drum_streams()
-    frames = librosa.onset.onset_detect(
+    onset_frames = librosa.onset.onset_detect(
         onset_envelope=onset_env,
         sr=sr,
         hop_length=hop,
@@ -122,7 +153,7 @@ def detect_drum_event_streams(
         delta=config.onset_delta,
         wait=max(1, config.onset_wait),
     )
-    if frames.size == 0 and config.prefer_recall:
+    if onset_frames.size == 0 and config.prefer_recall:
         peaks = librosa.util.peak_pick(
             _norm01(onset_env),
             pre_max=1,
@@ -132,8 +163,27 @@ def detect_drum_event_streams(
             delta=0.025,
             wait=1,
         )
-        frames = np.asarray(peaks, dtype=int)
+        onset_frames = np.asarray(peaks, dtype=int)
+
     stft = np.abs(librosa.stft(perc, n_fft=n_fft, hop_length=hop))
+    spectral_flux_env = _spectral_flux_envelope(stft)
+    spectral_flux_frames = np.asarray([], dtype=int)
+    if spectral_flux_env.size:
+        spectral_flux_frames = np.asarray(
+            librosa.util.peak_pick(
+                spectral_flux_env,
+                pre_max=1,
+                post_max=1,
+                pre_avg=2,
+                post_avg=2,
+                delta=max(0.0, float(config.spectral_flux_delta)),
+                wait=max(1, config.onset_wait),
+            ),
+            dtype=int,
+        )
+    onset_frame_set = {int(frame) for frame in onset_frames}
+    spectral_flux_frame_set = {int(frame) for frame in spectral_flux_frames}
+    frames = sorted(onset_frame_set | spectral_flux_frame_set)
     harmonic_rms = librosa.feature.rms(y=harmonic, hop_length=hop)[0]
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
     rms = librosa.feature.rms(y=perc, hop_length=hop)[0]
@@ -142,7 +192,7 @@ def detect_drum_event_streams(
     raw_events: list[DrumEvent] = []
     previous_ms: int | None = None
     cluster = -1
-    for frame in sorted(set(int(frame) for frame in frames if int(frame) < stft.shape[1])):
+    for frame in (int(frame) for frame in frames if int(frame) < stft.shape[1]):
         spectrum = stft[:, frame]
         total = float(np.sum(spectrum)) + 1e-9
         low = _band_energy(freqs, spectrum, 20, 250)
@@ -169,6 +219,12 @@ def detect_drum_event_streams(
         previous = float(onset01[frame - 1]) if frame > 0 and frame - 1 < len(onset01) else 0.0
         current = float(onset01[frame]) if frame < len(onset01) else 0.0
         sharp = max(0.0, current - previous)
+        onset_vote, spectral_flux_vote, detector_agreement = _detector_votes(
+            frame,
+            onset_frame_set,
+            spectral_flux_frame_set,
+            config.detector_tolerance_frames,
+        )
         features = {
             "low_ratio": low / total,
             "mid_low_ratio": mid_low / total,
@@ -181,6 +237,9 @@ def detect_drum_event_streams(
             "percussive_ratio": min(1.0, percussive_ratio),
             "transient_sharpness": min(1.0, sharp),
             "decay_profile": min(1.0, decay),
+            "detector_onset": onset_vote,
+            "detector_spectral_flux": spectral_flux_vote,
+            "detector_agreement": detector_agreement,
         }
         thresholds = DrumClassifierThresholds(low_confidence_min=config.low_confidence_min)
         family_scores = score_drum_hit_families(features, thresholds)
