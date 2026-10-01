@@ -71,7 +71,13 @@ def score_drum_hit_families(
     decay = _clamp(features.get("decay_profile", 0))
 
     # Older/direct callers may not provide these newer features. Treat missing
-    # values as neutral instead of automatically declaring harmonic pollution.
+    # values as neutral instead of automatically declaring harmonic pollution,
+    # and do not apply the richer snare evidence bonuses unless the caller
+    # actually supplied those measurements.
+    has_snare_detail = any(
+        key in features
+        for key in ("percussive_ratio", "spectral_flatness", "high_flux_strength")
+    )
     percussive_ratio = _clamp(features.get("percussive_ratio", 1.0))
     flatness = _clamp(features.get("spectral_flatness", thresholds.cymbal_flatness_min))
     harmonic_ratio = 1.0 - percussive_ratio
@@ -118,11 +124,15 @@ def score_drum_hit_families(
             + (sharp * .32)
             + (spread * .18)
             + (mid_low * .08)
-            + (flatness * .12)
-            + (percussive_ratio * .08)
-            + (high * .06)
-            + (medium_decay * .20)
-            + (high_flux_strength * .26)
+            + (
+                (flatness * .12)
+                + (percussive_ratio * .08)
+                + (high * .06)
+                + (medium_decay * .20)
+                + (high_flux_strength * .26)
+                if has_snare_detail
+                else 0.0
+            )
         ),
         "tom": (
             (mid_low * .48)
@@ -149,7 +159,7 @@ def score_drum_hit_families(
     if 0.0 < low_flux_peak < 75.0:
         scores["tom"] *= .65
     if has_band_flux and band_flux_strength < 0.30:
-        scores["tom"] *= .45
+        scores["tom"] *= .40
     if high < thresholds.hihat_high_ratio_min:
         scores["hihat"] *= .72
     if decay > thresholds.hihat_decay_max:
