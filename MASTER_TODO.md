@@ -94,8 +94,8 @@ After changing anything:
 - [?] Snare hit behavior
 - [?] Hi-hat behavior
 - [?] Cymbal behavior
-- [?] Stick/light motion behavior
-- [?] 8-channel drummer mapping
+- [~] Canonical nine-component drummer contract implemented; full geometry/render validation pending
+- [~] Independent stick/arm sequencing targets removed from the mapper/injector
 - [?] Visual choreography quality
 - [ ] Full musical drummer phrase logic
 - [ ] Band-member coordination
@@ -174,7 +174,42 @@ Multiple agents have historically worked from separate handoff reports, chat con
 
 Newest entries go first.
 
-### 2026-09-27 — Master ledger established
+### 2026-09-30 — Canonical nine-component drummer contract implemented
+**Agent:** ChatGPT/GitHub MCP  
+**Branch:** feature/restructure-core  
+**Goal:** Replace the remaining independent-stick/arm sequencing semantics with the nine-component drummer contract established by the user.
+
+**Changed:**
+- `docs/DRUMMER_COMPONENT_CONTRACT.md` — established the canonical nine sequenced components and the non-negotiable behavior.
+- `mapping/drum_mapper.py` — added `DRUMMER_COMPONENTS`, deterministic four-tom and left/right-cymbal assignment, and `map_events_to_drummer_components`; pose adaptation now exposes only canonical components.
+- `tools/integrate_drummer_v3_into_xsq.py` — injects effects only into canonical drummer components and rejects non-canonical targets.
+- `tests/test_drummer_v3_xsq_integration.py` — verifies exactly nine components, no independent stick/arm targets, deterministic tom assignment, and cymbal alternation.
+
+**Preserved intentionally:**
+- The drummer remains a virtual performer and does not consume the 256 AC channels.
+- Audio detection and scheduling remain upstream of the component mapper.
+- Multiple events at the same timestamp remain separate component events.
+- Visual geometry may still contain arms/sticks; those are not sequencing channels.
+
+**New behavior:**
+- Exactly nine canonical sequencing targets are exposed: kick, snare, hi-hat, four tom components, left cymbal, and right cymbal.
+- Snare/tom/hi-hat/cymbal events target the combined component containing the contacting stick geometry; kick targets kick only.
+- Cymbal events alternate left/right deterministically.
+
+**Tests/evidence:**
+- Added unit assertions for the nine-component contract and legacy stick/arm exclusion.
+- Existing CI/full-song render remains the required integration gate.
+
+**Known limitations:**
+- The current repository's visual drummer asset documentation still describes the older two-tom plus independent-arm/stick geometry. The geometry/exporter must be reconciled with the nine-component contract before visual verification can pass.
+- No current full-song MP4 was re-rendered in this change set.
+
+**Deferred work:**
+- Reconcile the xLights model geometry/submodels with TOM_1..TOM_4 and embedded contacting-stick geometry.
+- Run the full real-song XSQ + MP4 pipeline and inspect event-to-pixel behavior.
+- Verify left/right cymbal alternation and simultaneous-hit behavior in the rendered artifact.
+
+### 2026-09-29 — Master ledger established
 **Agent:** ChatGPT/GitHub MCP  
 **Change:** Established MASTER_TODO.md as the canonical cross-agent roadmap and handoff ledger.  
 **Preserved:** Existing ROADMAP_BETA_TODO.md, TASKS.md, and AGENTS.md; no existing sequencing logic removed.  
@@ -289,13 +324,15 @@ Newest entries go first.
 
 1. [ ] Enforce master-ledger requirement in AGENTS.md.
 2. [ ] Make TASKS.md point to MASTER_TODO.md as the first source of truth.
-3. [ ] Audit current drummer/band implementation against this ledger.
-4. [ ] Identify every drummer behavior that exists in code but lacks verification.
-5. [ ] Generate a real XSQ + MP4 validation artifact for the current drummer baseline.
-6. [ ] Fix the highest-impact drummer quality gaps one slice at a time.
-7. [ ] After each slice, update this ledger before starting the next slice.
-8. [ ] Reconcile ROADMAP_BETA_TODO.md with this master ledger rather than allowing two competing roadmaps.
-9. [ ] Establish a formal release/baseline tag once the current drummer/band baseline is proven.
+3. [x] Freeze the nine-component drummer sequencing contract.
+4. [~] Reconcile the actual drummer xLights geometry/submodels with the nine-component contract.
+5. [ ] Generate a real XSQ + full-song MP4 from the updated mapper/injector.
+6. [ ] Inspect the MP4 against XSQ component events and audible drum transients.
+7. [ ] Verify simultaneous kick/snare/cymbal/tom events and cymbal alternation.
+8. [ ] Fix the highest-impact remaining drummer quality gaps one slice at a time.
+9. [ ] After each slice, update this ledger before starting the next slice.
+10. [ ] Reconcile ROADMAP_BETA_TODO.md with this master ledger rather than allowing two competing roadmaps.
+11. [ ] Establish a formal release/baseline tag once the current drummer/band baseline is proven.
 
 ## 11. Important principle
 
