@@ -40,6 +40,14 @@ jobs:
           path: test_runs/stem_cache
           key: helix-demucs6-${{ runner.os }}-${{ hashFiles('Helix Audiolights.mp3') }}
 
+      - name: Evaluate deterministic labeled drum oracle
+        env:
+          PYTHONPATH: .
+        run: |
+          mkdir -p test_runs/drum_oracle
+          python tools/generate_drummer_ground_truth.py             --wav test_runs/drum_oracle/drummer_ground_truth.wav             --events test_runs/drum_oracle/events.json
+          python tools/evaluate_drum_detector_oracle.py             test_runs/drum_oracle/drummer_ground_truth.wav             test_runs/drum_oracle/events.json             --output test_runs/real_song_drum_diagnostics/oracle_evaluation.json             --tolerance-ms 70
+
       - name: Analyze full mix baseline
         env:
           PYTHONPATH: .
