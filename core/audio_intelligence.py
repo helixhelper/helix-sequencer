@@ -400,13 +400,14 @@ def _try_demucs_stem_separation(
     demucs_exe = shutil.which("demucs")
     if not demucs_exe:
         return None
-    _log(log_fn, "Stem split: attempting local Demucs separation.")
+    model_name = "htdemucs_6s"
+    _log(log_fn, f"Stem split: attempting local Demucs separation ({model_name}).")
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
         cmd = [
             demucs_exe,
             "-n",
-            "htdemucs",
+            model_name,
             "-o",
             str(out_dir),
             str(audio_path),
@@ -427,13 +428,15 @@ def _try_demucs_stem_separation(
     if track_dir is None:
         return None
 
+    expected_names = ("vocals", "drums", "bass", "guitar", "piano", "other")
     stems = {
-        "vocals": track_dir / "vocals.wav",
-        "drums": track_dir / "drums.wav",
-        "bass": track_dir / "bass.wav",
-        "other": track_dir / "other.wav",
+        name: track_dir / f"{name}.wav"
+        for name in expected_names
+        if (track_dir / f"{name}.wav").exists()
     }
-    if not stems["vocals"].exists():
+    required_names = {"vocals", "drums", "bass", "other"}
+    if not required_names.issubset(stems):
+        _log(log_fn, "Demucs: required stems were not produced; falling back.")
         return None
     _log(log_fn, f"Demucs: stems ready ({', '.join(sorted(stems))}).")
     return stems
@@ -579,6 +582,10 @@ def _try_moises_stem_separation(
             typed_urls["drums"] = url
         elif "bass" in low and "bass" not in typed_urls:
             typed_urls["bass"] = url
+        elif "guitar" in low and "guitar" not in typed_urls:
+            typed_urls["guitar"] = url
+        elif "piano" in low and "piano" not in typed_urls:
+            typed_urls["piano"] = url
         elif "other" in low and "other" not in typed_urls:
             typed_urls["other"] = url
     if len(typed_urls) < 2:
@@ -858,11 +865,17 @@ def build_stem_analysis(
             stems = {}
             source = "direct"
 
-    drum_src = stems.get("drums") or audio_path
+    isolated_drum_src = stems.get("drums")
+    drum_src = isolated_drum_src or audio_path
     bass_src = stems.get("bass") or audio_path
     vocal_src = stems.get("vocals") or audio_path
+    drum_source_label = f"{source}:drums" if isolated_drum_src is not None else f"{source}:mix"
     kicks, snares, hats = _analyze_drum_events(drum_src)
-    drum_event_streams = drum_intel.detect_drum_event_streams_from_file(drum_src, log_fn=log_fn)
+    drum_event_streams = drum_intel.detect_drum_event_streams_from_file(
+        drum_src,
+        log_fn=log_fn,
+        source_label=drum_source_label,
+    )
     bass_peaks = _analyze_peak_events(bass_src, "bass")
     vocal_peaks = _analyze_peak_events(vocal_src, "vocals")
     background_vocal_events = _classify_background_vocals(vocal_src, log_fn)
