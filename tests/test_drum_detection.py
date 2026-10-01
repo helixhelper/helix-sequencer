@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 
 from audio.drum_classification import classify_drum_hit, score_drum_hit_families
-from audio.drum_detection import DrumDetectionConfig, _detector_votes, _select_supported_families, detect_drum_event_streams
+from audio.drum_detection import DrumDetectionConfig, _compress_events, _detector_votes, _select_supported_families, detect_drum_event_streams
 
 
 class DrumDetectionTests(unittest.TestCase):
@@ -202,6 +202,23 @@ class DrumDetectionTests(unittest.TestCase):
         self.assertGreater(scores["kick"], 0.5)
         self.assertGreater(scores["cymbal"], 0.5)
         self.assertLess(scores["hihat"], scores["cymbal"])
+
+    def test_compression_deduplicates_same_family_across_interleaved_hits(self) -> None:
+        from audio.drum_classification import DrumEvent
+
+        events = [
+            DrumEvent(0.100, 0.60, 0.70, {}, 1, "kick"),
+            DrumEvent(0.110, 0.50, 0.70, {}, 1, "hihat"),
+            DrumEvent(0.121, 0.90, 0.80, {}, 1, "kick"),
+        ]
+
+        compressed = _compress_events(events, min_gap_ms=30)
+        kicks = [event for event in compressed if event.drum_type == "kick"]
+        hats = [event for event in compressed if event.drum_type == "hihat"]
+
+        self.assertEqual(len(kicks), 1)
+        self.assertEqual(len(hats), 1)
+        self.assertAlmostEqual(kicks[0].timestamp, 0.121)
 
     def test_detector_votes_match_nearby_onset_and_flux_candidates(self) -> None:
         onset, flux, agreement = _detector_votes(
