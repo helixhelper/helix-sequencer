@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 from core.lazy_imports import LazyModule, optional_import
 from core import audio_trigger_routes
 from core import feature_state
+from core import stem_cache
 from core import band_sync
 from core import model_parser as xmp
 from core import spatial_scene
@@ -848,7 +849,27 @@ def build_stem_analysis(
 
     stems: dict[str, Path] | None = None
     source = "local"
-    if use_moises:
+    prefer_moises = bool(use_moises and (api_key or "").strip())
+    allowed_cache_sources = {"moises"} if prefer_moises else {"demucs", "local"}
+    cached = stem_cache.load_cached_stems(
+        audio_path,
+        stem_dir,
+        allowed_sources=allowed_cache_sources,
+    )
+    cache_hit = cached is not None
+    if cached is not None:
+        source, stems = cached
+        # A local HPSS cache should not hide a newly available Demucs install.
+        # Cached Demucs output remains reusable even when the executable/model
+        # is unavailable on a later run.
+        if source == "local" and shutil.which("demucs"):
+            stems = None
+            source = "local"
+            cache_hit = false
+        else:
+            _log(log_fn, f"Stem split: reusing cached {source} stems for {audio_path.name}.")
+
+    if not stems and prefer_moises:
         stems = _try_moises_stem_separation(audio_path, stem_dir, api_key or "", log_fn)
         if stems:
             source = "moises"
@@ -864,6 +885,19 @@ def build_stem_analysis(
             _log(log_fn, f"Stem split fallback failed, using direct audio analysis only: {exc}")
             stems = {}
             source = "direct"
+
+    if stems and not cache_hit:
+        try:
+            separator_name = "htdemucs_6s" if source == "demucs" else source
+            stem_cache.write_stem_cache_manifest(
+                audio_path,
+                stem_dir,
+                source=source,
+                stems=stems,
+                separator=separator_name,
+            )
+        except Exception as exc:
+            _log(log_fn, f"Stem cache manifest skipped: {exc}")
 
     isolated_drum_src = stems.get("drums")
     drum_src = isolated_drum_src or audio_path
