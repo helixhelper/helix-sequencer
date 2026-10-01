@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from audio.drum_classification import DrumEvent
 from mapping.drum_mapper import DRUMMER_COMPONENTS, map_events_to_drummer_components, map_events_to_drummer_v3_poses
@@ -68,6 +72,51 @@ def test_injection_helper_preserves_existing_xlights_effect_container() -> None:
     container = _find_or_create_element_effects(root)
     assert container is root.find("ElementEffects")
     assert [e.get("name") for e in container.findall("Element")] == ["Existing"]
+
+
+def test_injector_uses_production_stem_analysis_path() -> None:
+    from tools import integrate_drummer_v3_into_xsq as injector
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        root = Path(tempdir)
+        base = root / "base.xsq"
+        output = root / "out.xsq"
+        audio = root / "song.wav"
+        cache = root / "stem-cache"
+        base.write_text("<xsequence><ElementEffects/></xsequence>", encoding="utf-8")
+        audio.write_bytes(b"fake-audio")
+
+        streams = {
+            "kick_events": [DrumEvent(0.1, 0.8, 0.9, {}, 1, "kick", source="demucs:drums")],
+            "snare_events": [],
+            "tom_events": [],
+            "hihat_events": [],
+            "cymbal_events": [],
+            "drum_bus_events": [],
+        }
+        analysis = SimpleNamespace(
+            source="demucs",
+            stems={"drums": cache / "song" / "drums.wav"},
+            drum_event_streams=streams,
+        )
+        with mock.patch.object(injector, "build_stem_analysis", return_value=analysis) as build:
+            report = injector.inject_drummer_v3(
+                base,
+                output,
+                audio,
+                stem_cache_dir=cache,
+            )
+
+        build.assert_called_once()
+        assert build.call_args.kwargs["audio_path"] == audio
+        assert build.call_args.kwargs["cache_dir"] == cache
+        assert report["stem_source"] == "demucs"
+        assert report["detector_counts"]["kick_events"] == 1
+        assert report["placement_count"] == 1
+        tree = ET.parse(output)
+        effects = tree.findall(".//Element[@name='HX_SNOWMAN_DRUMMER_KICK']/EffectLayer/Effect")
+        assert len(effects) == 1
+        assert effects[0].get("sourceDrumType") == "kick"
 
 
 def test_injection_helper_creates_current_xlights_container_without_legacy_effects() -> None:
