@@ -120,6 +120,7 @@ def score_drum_hit_families(
             + (percussive_ratio * .08)
             + (high * .06)
             + (medium_decay * .20)
+            + (high_flux_strength * .26)
         ),
         "tom": (
             (mid_low * .48)
