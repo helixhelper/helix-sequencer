@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 
 from audio.drum_classification import classify_drum_hit, score_drum_hit_families
-from audio.drum_detection import DrumDetectionConfig, _select_supported_families, detect_drum_event_streams
+from audio.drum_detection import DrumDetectionConfig, _detector_votes, _select_supported_families, detect_drum_event_streams
 
 
 class DrumDetectionTests(unittest.TestCase):
@@ -111,6 +111,27 @@ class DrumDetectionTests(unittest.TestCase):
         self.assertGreater(scores["cymbal"], 0.5)
         self.assertLess(scores["hihat"], scores["cymbal"])
 
+    def test_detector_votes_match_nearby_onset_and_flux_candidates(self) -> None:
+        onset, flux, agreement = _detector_votes(
+            101,
+            {100},
+            {102},
+            tolerance_frames=1,
+        )
+        self.assertEqual(onset, 1.0)
+        self.assertEqual(flux, 1.0)
+        self.assertEqual(agreement, 2.0)
+
+        onset, flux, agreement = _detector_votes(
+            110,
+            {100},
+            {109},
+            tolerance_frames=1,
+        )
+        self.assertEqual(onset, 0.0)
+        self.assertEqual(flux, 1.0)
+        self.assertEqual(agreement, 1.0)
+
     def test_synthetic_percussive_signal_produces_events(self) -> None:
         sr = 22050
         y = np.zeros(sr, dtype=np.float32)
@@ -133,6 +154,8 @@ class DrumDetectionTests(unittest.TestCase):
         self.assertTrue(flattened)
         self.assertTrue(all(event.source == "demucs:drums" for event in flattened))
         self.assertTrue(all("score_kick" in event.frequency_band_info for event in flattened))
+        self.assertTrue(all("detector_agreement" in event.frequency_band_info for event in flattened))
+        self.assertTrue(any(event.frequency_band_info["detector_spectral_flux"] > 0 for event in flattened))
 
 
 if __name__ == "__main__":
