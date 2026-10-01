@@ -17,35 +17,52 @@ DRUM_SUBMODEL_BY_TYPE = {
 
 DRUM_PRIORITY = {"kick": 0, "snare": 1, "cymbal": 2, "tom": 3, "hihat": 4, "drum_bus": 5}
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER"
+
+# Canonical sequenced drummer components. Arms/sticks remain geometry inside these
+# components; they are never independent sequencing channels.
+DRUMMER_COMPONENTS = (
+    "HX_SNOWMAN_DRUMMER_KICK",
+    "HX_SNOWMAN_DRUMMER_SNARE",
+    "HX_SNOWMAN_DRUMMER_HI_HAT",
+    "HX_SNOWMAN_DRUMMER_TOM_1",
+    "HX_SNOWMAN_DRUMMER_TOM_2",
+    "HX_SNOWMAN_DRUMMER_TOM_3",
+    "HX_SNOWMAN_DRUMMER_TOM_4",
+    "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT",
+    "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT",
+)
+
 DRUMMER_V3_POSE_BY_TYPE = {
     "kick": "kick_hit",
     "snare": "snare_hit",
     "hihat": "hi_hat_pulse",
-    "tom": "left_tom_hit",
-    "cymbal": "right_crash",
+    "tom": "tom_hit",
+    "cymbal": "cymbal_hit",
     "drum_bus": "downbeat_impact",
 }
+
+# Poses resolve to sequenced components only. Contacting-stick geometry is part
+# of the target component and must not become a separate target.
 DRUMMER_V3_SUBMODELS_BY_POSE = {
-    "idle_ready": ("HX_SNOWMAN_DRUMMER_LEFT_ARM", "HX_SNOWMAN_DRUMMER_RIGHT_ARM"),
+    "idle_ready": (),
     "kick_hit": ("HX_SNOWMAN_DRUMMER_KICK",),
-    "snare_hit": ("HX_SNOWMAN_DRUMMER_SNARE", "HX_SNOWMAN_DRUMMER_LEFT_STICK"),
-    "hi_hat_pulse": ("HX_SNOWMAN_DRUMMER_HI_HAT", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
-    "left_tom_hit": ("HX_SNOWMAN_DRUMMER_TOM_LEFT", "HX_SNOWMAN_DRUMMER_LEFT_STICK"),
-    "right_tom_hit": ("HX_SNOWMAN_DRUMMER_TOM_RIGHT", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
-    "left_crash": ("HX_SNOWMAN_DRUMMER_CYMBAL_LEFT", "HX_SNOWMAN_DRUMMER_LEFT_STICK"),
-    "right_crash": ("HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
-    "both_crash": ("HX_SNOWMAN_DRUMMER_CYMBAL_LEFT", "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT", "HX_SNOWMAN_DRUMMER_LEFT_STICK", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
-    "downbeat_impact": ("HX_SNOWMAN_DRUMMER_KICK", "HX_SNOWMAN_DRUMMER_SNARE", "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT", "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT", "HX_SNOWMAN_DRUMMER_LEFT_STICK", "HX_SNOWMAN_DRUMMER_RIGHT_STICK"),
+    "snare_hit": ("HX_SNOWMAN_DRUMMER_SNARE",),
+    "hi_hat_pulse": ("HX_SNOWMAN_DRUMMER_HI_HAT",),
+    "tom_hit": ("HX_SNOWMAN_DRUMMER_TOM_1",),
+    "cymbal_hit": ("HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT",),
+    "downbeat_impact": (
+        "HX_SNOWMAN_DRUMMER_KICK",
+        "HX_SNOWMAN_DRUMMER_SNARE",
+        "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT",
+    ),
 }
+
 DRUMMER_V3_DURATION_BY_POSE = {
     "kick_hit": 150,
     "snare_hit": 125,
     "hi_hat_pulse": 80,
-    "left_tom_hit": 155,
-    "right_tom_hit": 155,
-    "left_crash": 320,
-    "right_crash": 320,
-    "both_crash": 360,
+    "tom_hit": 155,
+    "cymbal_hit": 320,
     "downbeat_impact": 220,
 }
 
@@ -114,29 +131,73 @@ def map_events_to_submodels(events: Iterable[DrumEvent]) -> list[dict[str, objec
     return mapped
 
 
-def drummer_v3_pose_for_event(event: DrumEvent, event_index: int = 0) -> str:
+def drummer_component_for_event(event: DrumEvent, *, event_index: int = 0) -> str:
+    """Return exactly one canonical nine-component target for a drum event.
+
+    Generic toms rotate deterministically across four tom components. Cymbals
+    alternate left/right. No arm or stick target is ever emitted.
+    """
+    if event.drum_type == "kick":
+        return DRUMMER_COMPONENTS[0]
+    if event.drum_type == "snare":
+        return DRUMMER_COMPONENTS[1]
+    if event.drum_type == "hihat":
+        return DRUMMER_COMPONENTS[2]
     if event.drum_type == "tom":
-        return "right_tom_hit" if event_index % 2 == 0 else "left_tom_hit"
+        return DRUMMER_COMPONENTS[3 + (event_index % 4)]
     if event.drum_type == "cymbal":
-        if event.velocity >= 0.9 and event.confidence >= 0.65:
-            return "both_crash"
-        return "left_crash" if event_index % 2 else "right_crash"
+        return DRUMMER_COMPONENTS[7 + (event_index % 2)]
+    return DRUMMER_COMPONENTS[0]
+
+
+def map_events_to_drummer_components(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
+    """Map detected events to the canonical nine-component drummer contract."""
+    mapped: list[dict[str, object]] = []
+    tom_index = 0
+    cymbal_index = 0
+    for event in sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9), -item.velocity)):
+        if event.drum_type == "tom":
+            component = drummer_component_for_event(event, event_index=tom_index)
+            tom_index += 1
+        elif event.drum_type == "cymbal":
+            component = drummer_component_for_event(event, event_index=cymbal_index)
+            cymbal_index += 1
+        else:
+            component = drummer_component_for_event(event)
+        mapped.append({
+            "timestamp_ms": event.timestamp_ms,
+            "end_ms": event.timestamp_ms + DRUMMER_V3_DURATION_BY_POSE.get(DRUMMER_V3_POSE_BY_TYPE.get(event.drum_type, "kick_hit"), 140),
+            "model": DRUMMER_V3_MODEL,
+            "drum_type": event.drum_type,
+            "component": component,
+            "intensity": round(event.velocity, 3),
+            "confidence": event.confidence,
+            "source": event.source,
+        })
+    return mapped
+
+
+def drummer_v3_pose_for_event(event: DrumEvent, event_index: int = 0) -> str:
     return DRUMMER_V3_POSE_BY_TYPE.get(event.drum_type, "downbeat_impact")
 
 
 def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
     mapped: list[dict[str, object]] = []
-    tom_index = 0
-    cymbal_index = 0
-    for event in sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9))):
-        if event.drum_type == "tom":
-            pose = drummer_v3_pose_for_event(event, tom_index); tom_index += 1
-        elif event.drum_type == "cymbal":
-            pose = drummer_v3_pose_for_event(event, cymbal_index); cymbal_index += 1
-        else:
-            pose = drummer_v3_pose_for_event(event, 0)
-        duration = DRUMMER_V3_DURATION_BY_POSE.get(pose, 140)
-        mapped.append({"timestamp_ms": event.timestamp_ms, "end_ms": event.timestamp_ms + duration, "model": DRUMMER_V3_MODEL, "drum_type": event.drum_type, "pose": pose, "submodels": list(DRUMMER_V3_SUBMODELS_BY_POSE[pose]), "intensity": round(event.velocity, 3), "confidence": event.confidence, "source": event.source})
+    component_events = map_events_to_drummer_components(events)
+    for item in component_events:
+        pose = DRUMMER_V3_POSE_BY_TYPE.get(str(item["drum_type"]), "downbeat_impact")
+        mapped.append({
+            "timestamp_ms": item["timestamp_ms"],
+            "end_ms": item["end_ms"],
+            "model": DRUMMER_V3_MODEL,
+            "drum_type": item["drum_type"],
+            "pose": pose,
+            "submodels": [item["component"]],
+            "component": item["component"],
+            "intensity": item["intensity"],
+            "confidence": item["confidence"],
+            "source": item["source"],
+        })
     return mapped
 
 
@@ -153,4 +214,4 @@ def resolve_drum_streams(streams: dict[str, list[DrumEvent]] | None, *, fallback
         if bus_events and typed_count < max(2, len(bus_events) // 2):
             events.extend(distribute_drum_bus_events(bus_events)); fallback_mode = "partial_detection_plus_bus"
     scheduled = schedule_drum_events(events, config)
-    return {"fallback_mode": fallback_mode, "events": scheduled, "mapped_events": map_events_to_submodels(scheduled), "drummer_v3_pose_events": map_events_to_drummer_v3_poses(scheduled), "counts": {key: len([event for event in scheduled if stream_key_for_type(event.drum_type) == key]) for key in DRUM_STREAM_KEYS}}
+    return {"fallback_mode": fallback_mode, "events": scheduled, "mapped_events": map_events_to_submodels(scheduled), "drummer_v3_pose_events": map_events_to_drummer_v3_poses(scheduled), "drummer_component_events": map_events_to_drummer_components(scheduled), "counts": {key: len([event for event in scheduled if stream_key_for_type(event.drum_type) == key]) for key in DRUM_STREAM_KEYS}}
