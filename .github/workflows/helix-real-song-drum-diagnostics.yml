@@ -6,6 +6,10 @@ on:
       - codex/derwin-audio-intelligence-v1
   workflow_dispatch:
 
+concurrency:
+  group: helix-real-song-drums-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
