@@ -17,6 +17,7 @@ DRUM_SUBMODEL_BY_TYPE = {
 
 DRUM_PRIORITY = {"kick": 0, "snare": 1, "cymbal": 2, "tom": 3, "hihat": 4, "drum_bus": 5}
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER"
+DRUMMER_TYPED_HITS = frozenset({"kick", "snare", "hihat", "tom", "cymbal"})
 
 # Canonical sequenced drummer hit composites. These are the only production
 # sequencing targets. Contact geometry is embedded in each composite:
@@ -164,7 +165,7 @@ def drummer_component_for_event(event: DrumEvent, *, event_index: int = 0) -> st
         return DRUMMER_COMPONENTS[3 + (event_index % 3)]
     if event.drum_type == "cymbal":
         return DRUMMER_COMPONENTS[6 + (event_index % 2)]
-    return DRUMMER_COMPONENTS[0]
+    raise ValueError(f"Unsupported drummer hit type: {event.drum_type!r}")
 
 
 def map_events_to_drummer_components(events: Iterable[DrumEvent]) -> list[dict[str, object]]:
@@ -173,6 +174,11 @@ def map_events_to_drummer_components(events: Iterable[DrumEvent]) -> list[dict[s
     tom_index = 0
     cymbal_index = 0
     for event in sorted(events, key=lambda item: (item.timestamp_ms, DRUM_PRIORITY.get(item.drum_type, 9), -item.velocity)):
+        # Ambiguous drum_bus events are analysis evidence, not a physical hit.
+        # Suppress them defensively here as well as in resolve_drum_streams() so
+        # direct mapper callers can never turn uncertainty into a fake kick.
+        if event.drum_type not in DRUMMER_TYPED_HITS:
+            continue
         if event.drum_type == "tom":
             component = drummer_component_for_event(event, event_index=tom_index)
             tom_index += 1
