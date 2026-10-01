@@ -1,27 +1,52 @@
 from __future__ import annotations
 
-import tempfile
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 from audio.drum_classification import DrumEvent
-from mapping.drum_mapper import map_events_to_drummer_v3_poses
+from mapping.drum_mapper import DRUMMER_COMPONENTS, map_events_to_drummer_components, map_events_to_drummer_v3_poses
 
 
-POSE_TO_CHANNELS = {
-    "kick_hit": {257, 264},
-    "snare_hit": {258, 262, 263},
-    "hi_hat_pulse": {259, 262},
-    "left_tom_hit": {260, 262},
-    "right_tom_hit": {260, 263},
-    "left_crash": {261, 262},
-    "right_crash": {261, 263},
-    "both_crash": {261, 262, 263},
-    "downbeat_impact": {264, 257, 258, 261, 262, 263},
-}
+LEGACY_STICK_OR_ARM_TOKENS = ("LEFT_STICK", "RIGHT_STICK", "LEFT_ARM", "RIGHT_ARM")
 
 
-def test_v3_mapper_only_emits_declared_v3_poses_and_targets() -> None:
+def test_canonical_drummer_has_exactly_nine_components() -> None:
+    assert len(DRUMMER_COMPONENTS) == 9
+    assert len(set(DRUMMER_COMPONENTS)) == 9
+    assert all("STICK" not in name and "ARM" not in name for name in DRUMMER_COMPONENTS)
+
+
+def test_component_mapper_never_emits_independent_sticks_or_arms() -> None:
+    events = [
+        DrumEvent(0.1, 0.8, 0.7, {}, 1, "kick"),
+        DrumEvent(0.2, 0.9, 0.8, {}, 2, "snare"),
+        DrumEvent(0.3, 0.6, 0.7, {}, 3, "hihat"),
+        DrumEvent(0.4, 0.7, 0.7, {}, 4, "tom"),
+        DrumEvent(0.5, 0.7, 0.7, {}, 5, "tom"),
+        DrumEvent(0.6, 0.7, 0.7, {}, 6, "tom"),
+        DrumEvent(0.7, 0.7, 0.7, {}, 7, "tom"),
+        DrumEvent(0.8, 1.0, 0.8, {}, 8, "cymbal"),
+        DrumEvent(0.9, 0.8, 0.8, {}, 9, "cymbal"),
+    ]
+    mapped = map_events_to_drummer_components(events)
+    components = [str(item["component"]) for item in mapped]
+    assert set(components).issubset(set(DRUMMER_COMPONENTS))
+    assert not any(any(token in component for token in LEGACY_STICK_OR_ARM_TOKENS) for component in components)
+    assert components[0] == "HX_SNOWMAN_DRUMMER_KICK"
+    assert components[1] == "HX_SNOWMAN_DRUMMER_SNARE"
+    assert components[2] == "HX_SNOWMAN_DRUMMER_HI_HAT"
+    assert components[3:7] == [
+        "HX_SNOWMAN_DRUMMER_TOM_1",
+        "HX_SNOWMAN_DRUMMER_TOM_2",
+        "HX_SNOWMAN_DRUMMER_TOM_3",
+        "HX_SNOWMAN_DRUMMER_TOM_4",
+    ]
+    assert components[7:9] == [
+        "HX_SNOWMAN_DRUMMER_CYMBAL_LEFT",
+        "HX_SNOWMAN_DRUMMER_CYMBAL_RIGHT",
+    ]
+
+
+def test_v3_pose_adapter_uses_only_canonical_component_targets() -> None:
     events = [
         DrumEvent(0.1, 0.8, 0.7, {}, 1, "kick"),
         DrumEvent(0.2, 0.9, 0.8, {}, 2, "snare"),
@@ -31,10 +56,9 @@ def test_v3_mapper_only_emits_declared_v3_poses_and_targets() -> None:
     ]
     mapped = map_events_to_drummer_v3_poses(events)
     for item in mapped:
-        pose = str(item["pose"])
-        assert pose in POSE_TO_CHANNELS
-        assert str(item["model"]) == "HX_SNOWMAN_DRUMMER"
-        assert all(str(name).startswith("HX_SNOWMAN_DRUMMER_") for name in item["submodels"])
+        assert str(item["component"]) in DRUMMER_COMPONENTS
+        assert all(token not in str(item["component"]) for token in LEGACY_STICK_OR_ARM_TOKENS)
+        assert list(item["submodels"]) == [item["component"]]
 
 
 def test_injection_helper_preserves_existing_xlights_effect_container() -> None:
