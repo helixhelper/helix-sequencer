@@ -203,15 +203,50 @@ def map_events_to_drummer_v3_poses(events: Iterable[DrumEvent]) -> list[dict[str
 
 def resolve_drum_streams(streams: dict[str, list[DrumEvent]] | None, *, fallback_kicks: Iterable[int] = (), fallback_snares: Iterable[int] = (), fallback_hats: Iterable[int] = (), fallback_cymbals: Iterable[int] = (), config: DrumMappingConfig = DrumMappingConfig()) -> dict[str, object]:
     streams = streams or empty_drum_streams()
-    typed_count = sum(len(streams.get(key, [])) for key in DRUM_STREAM_KEYS if key != "drum_bus_events")
+    typed_streams = {
+        key: list(streams.get(key, []))
+        for key in DRUM_STREAM_KEYS
+        if key != "drum_bus_events"
+    }
+    typed_events = flatten_drum_streams({**typed_streams, "drum_bus_events": []})
+    typed_count = len(typed_events)
     bus_events = list(streams.get("drum_bus_events", []))
+
     if typed_count == 0 and bus_events:
-        events = distribute_drum_bus_events(bus_events); fallback_mode = "drum_bus_distribution"
+        events = distribute_drum_bus_events(bus_events)
+        fallback_mode = "drum_bus_distribution"
     elif typed_count == 0:
-        events = flatten_drum_streams(build_streams_from_legacy(fallback_kicks, fallback_snares, fallback_hats, fallback_cymbals)); fallback_mode = "legacy_marks"
+        events = flatten_drum_streams(
+            build_streams_from_legacy(
+                fallback_kicks,
+                fallback_snares,
+                fallback_hats,
+                fallback_cymbals,
+            )
+        )
+        fallback_mode = "legacy_marks"
     else:
-        events = flatten_drum_streams(streams); fallback_mode = "typed_detection"
+        # Ambiguous bus events are never scheduled directly. Historically the
+        # mapper kept them (which defaulted to kick) and could also add a
+        # distributed replacement, double-counting one uncertain onset.
+        events = typed_events
+        fallback_mode = "typed_detection"
         if bus_events and typed_count < max(2, len(bus_events) // 2):
-            events.extend(distribute_drum_bus_events(bus_events)); fallback_mode = "partial_detection_plus_bus"
+            events = typed_events + distribute_drum_bus_events(bus_events)
+            fallback_mode = "partial_detection_plus_bus"
+        elif bus_events:
+            fallback_mode = "typed_detection_bus_suppressed"
+
     scheduled = schedule_drum_events(events, config)
-    return {"fallback_mode": fallback_mode, "events": scheduled, "mapped_events": map_events_to_submodels(scheduled), "drummer_v3_pose_events": map_events_to_drummer_v3_poses(scheduled), "drummer_component_events": map_events_to_drummer_components(scheduled), "counts": {key: len([event for event in scheduled if stream_key_for_type(event.drum_type) == key]) for key in DRUM_STREAM_KEYS}}
+    return {
+        "fallback_mode": fallback_mode,
+        "events": scheduled,
+        "mapped_events": map_events_to_submodels(scheduled),
+        "drummer_v3_pose_events": map_events_to_drummer_v3_poses(scheduled),
+        "drummer_component_events": map_events_to_drummer_components(scheduled),
+        "counts": {
+            key: len([event for event in scheduled if stream_key_for_type(event.drum_type) == key])
+            for key in DRUM_STREAM_KEYS
+        },
+        "suppressed_bus_count": len(bus_events) if fallback_mode == "typed_detection_bus_suppressed" else 0,
+    }
