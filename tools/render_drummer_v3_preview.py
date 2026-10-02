@@ -1,152 +1,250 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import json
+import re
+import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import imageio.v2 as imageio
 import imageio_ffmpeg
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
-TARGETS = {
-    "HX_SNOWMAN_DRUMMER_HIT_KICK": "KICK",
-    "HX_SNOWMAN_DRUMMER_HIT_SNARE": "SNARE",
-    "HX_SNOWMAN_DRUMMER_HIT_HI_HAT": "HI-HAT / PEDAL",
-    "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT": "TOM L",
-    "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT": "TOM R",
-    "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR": "FLOOR TOM",
-    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT": "CRASH L",
-    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": "CRASH R",
+from tools.build_drummer_v3_png_layers import build_overlay, load_manifest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE_IMAGE = ROOT / "fixtures" / "band_geometry" / "source" / "drummerbg.png"
+LAYER_MANIFEST = ROOT / "fixtures" / "band_geometry" / "drummer_v3_png_layer_manifest.json"
+
+LAYER_BY_TARGET = {
+    "HX_SNOWMAN_DRUMMER_HIT_KICK": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_kick.png",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_snare.png",
+    "HX_SNOWMAN_DRUMMER_HIT_HI_HAT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_hi_hat.png",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_left_tom.png",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_right_tom.png",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_floor_tom.png",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_left_crash.png",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_right_crash.png",
 }
 
-POSE_NAMES = {
-    "kick_hit": "KICK",
-    "snare_hit": "SNARE",
-    "hi_hat_pulse": "HI-HAT / PEDAL",
-    "left_tom_hit": "TOM L",
-    "right_tom_hit": "TOM R",
-    "floor_tom_hit": "FLOOR TOM",
-    "left_crash": "CRASH L",
-    "right_crash": "CRASH R",
-    "downbeat_impact": "FULL KIT",
+LAYER_ID_BY_TARGET = {
+    "HX_SNOWMAN_DRUMMER_HIT_KICK": "kick_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE": "snare_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_HI_HAT": "hi_hat_pulse",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT": "left_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT": "right_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR": "floor_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT": "left_crash",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": "right_crash",
 }
 
+DOWNBEAT_OVERLAY_KEY = "__DOWNBEAT_IMPACT__"
+DOWNBEAT_LAYER_ID = "downbeat_impact"
+DOWNBEAT_COMPONENTS = (
+    "HX_SNOWMAN_DRUMMER_HIT_KICK",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT",
+)
 
-def parse_effects(xsq: Path) -> list[tuple[int, int, str, str]]:
+
+def _detect_kit_panel(source: Image.Image) -> tuple[int, int, int, int]:
+    """Locate the dark xLights/drummer panel inside the approved reference.
+
+    The approved source includes gray page/canvas margins around the actual
+    black model panel. The authored normalized hit coordinates are relative to
+    that black panel, not to the outer reference image.
+    """
+    rgb = np.asarray(source.convert("RGB"), dtype=np.float32)
+    luminance = rgb.mean(axis=2)
+    dark = luminance < 90.0
+    row_fraction = dark.mean(axis=1)
+    col_fraction = dark.mean(axis=0)
+    rows = np.flatnonzero(row_fraction > 0.15)
+    cols = np.flatnonzero(col_fraction > 0.15)
+    if rows.size == 0 or cols.size == 0:
+        raise ValueError("Unable to locate dark drummer panel in approved source image")
+    x0, x1 = int(cols[0]), int(cols[-1]) + 1
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    if (x1 - x0) < source.width * 0.25 or (y1 - y0) < source.height * 0.25:
+        raise ValueError(
+            f"Detected drummer panel is implausibly small: {(x0, y0, x1, y1)}"
+        )
+    return x0, y0, x1, y1
+
+
+def _place_panel_overlay(
+    local_overlay: Image.Image,
+    source_size: tuple[int, int],
+    panel_box: tuple[int, int, int, int],
+) -> Image.Image:
+    x0, y0, x1, y1 = panel_box
+    panel_size = (x1 - x0, y1 - y0)
+    overlay = local_overlay.convert("RGBA")
+    if overlay.size != panel_size:
+        overlay = overlay.resize(panel_size, Image.Resampling.LANCZOS)
+    full = Image.new("RGBA", source_size, (0, 0, 0, 0))
+    full.alpha_composite(overlay, (x0, y0))
+    return full
+
+
+def _effect_intensity(settings: str) -> float:
+    match = re.search(r"E_SLIDER_Brightness=([0-9.]+)", settings or "")
+    if not match:
+        return 1.0
+    try:
+        return max(0.08, min(1.0, float(match.group(1))))
+    except ValueError:
+        return 1.0
+
+
+def parse_effects(xsq: Path) -> list[tuple[int, int, str, float]]:
     root = ET.parse(xsq).getroot()
-    out: list[tuple[int, int, str, str]] = []
+    out: list[tuple[int, int, str, float]] = []
     for element in root.findall("./ElementEffects/Element"):
         name = element.get("name", "")
-        if name not in TARGETS:
+        if name not in LAYER_BY_TARGET:
             continue
         for layer in element.findall("EffectLayer"):
             for fx in layer.findall("Effect"):
-                pose = fx.get("sourcePose", "")
-                out.append((
-                    int(float(fx.get("startTime", "0"))),
-                    int(float(fx.get("endTime", "0"))),
-                    name,
-                    pose,
-                ))
+                out.append(
+                    (
+                        int(float(fx.get("startTime", "0"))),
+                        int(float(fx.get("endTime", "0"))),
+                        name,
+                        _effect_intensity(fx.get("settings", "")),
+                    )
+                )
     return sorted(out)
 
 
-def draw_drummer(width: int, height: int, active: dict[str, float], t_ms: int, duration_ms: int, font) -> Image.Image:
-    im = Image.new("RGB", (width, height), (7, 10, 18))
-    d = ImageDraw.Draw(im)
+def _fit_on_canvas(image: Image.Image, width: int, height: int) -> Image.Image:
+    source = image.convert("RGBA")
+    scale = min(width / source.width, height / source.height)
+    size = (
+        max(1, round(source.width * scale)),
+        max(1, round(source.height * scale)),
+    )
+    resized = source.resize(size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (width, height), (7, 10, 18, 255))
+    x = (width - size[0]) // 2
+    y = (height - size[1]) // 2
+    canvas.alpha_composite(resized, (x, y))
+    return canvas
 
-    # Stage.
-    d.rectangle((0, int(height * .72), width, height), fill=(12, 17, 28))
-    for x in range(0, width, 48):
-        d.line((x, int(height * .72), x + 170, height), fill=(30, 42, 60), width=1)
 
-    cx, cy = width // 2, int(height * .38)
+def prepare_visual_assets(
+    width: int = 960,
+    height: int = 540,
+) -> tuple[Image.Image, dict[str, Image.Image]]:
+    if not SOURCE_IMAGE.exists():
+        raise FileNotFoundError(f"Missing approved drummer source image: {SOURCE_IMAGE}")
 
-    def glow_box(box, intensity, label):
-        intensity = max(0.0, min(1.0, intensity))
-        if intensity > .02:
-            glow = int(70 + 185 * intensity)
-            for pad in (18, 10, 4):
-                b = tuple(int(v) for v in (box[0]-pad, box[1]-pad, box[2]+pad, box[3]+pad))
-                d.ellipse(b, outline=(255, 90, 90), width=max(2, pad // 4))
-        d.ellipse(box, fill=(45 + int(150*intensity), 50 + int(90*intensity), 65 + int(80*intensity)), outline=(215, 225, 235), width=2)
-        tw = d.textbbox((0,0), label, font=font)[2]
-        d.text(((box[0]+box[2]-tw)/2, box[3]+5), label, font=font, fill=(235,240,248))
+    with Image.open(SOURCE_IMAGE) as source:
+        source_rgba = source.convert("RGBA")
+        source_size = source_rgba.size
+        panel_box = _detect_kit_panel(source_rgba)
+        panel_size = (
+            panel_box[2] - panel_box[0],
+            panel_box[3] - panel_box[1],
+        )
+        base = _fit_on_canvas(source_rgba, width, height)
 
-    # Snowman body.
-    d.ellipse((cx-65, cy-55, cx+65, cy+75), fill=(225,230,238), outline=(150,160,175), width=3)
-    d.ellipse((cx-46, cy-112, cx+46, cy-20), fill=(235,240,246), outline=(150,160,175), width=3)
-    d.rectangle((cx-38, cy-128, cx+38, cy-112), fill=(30,35,45))
-    d.rectangle((cx-25, cy-142, cx+25, cy-127), fill=(40,45,55))
-    d.line((cx-42, cy-34, cx+42, cy-34), fill=(45,90,125), width=5)
+    manifest = load_manifest(LAYER_MANIFEST)
+    manifest_layers = {
+        str(layer["id"]): layer
+        for layer in manifest.get("layers", [])
+        if isinstance(layer, dict) and layer.get("id")
+    }
 
-    # Drum kit geometry: every illuminated object corresponds to a real XSQ target.
-    kick = (cx-65, cy+65, cx+65, cy+125)
-    snare = (cx-145, cy+35, cx-80, cy+78)
-    tom_l = (cx-82, cy-5, cx-28, cy+36)
-    tom_r = (cx-20, cy-8, cx+34, cy+34)
-    floor_tom = (cx+82, cy+30, cx+150, cy+88)
-    hi_hat = (cx-190, cy-10, cx-140, cy)
-    crash_l = (cx-215, cy-95, cx-145, cy-75)
-    crash_r = (cx+145, cy-95, cx+215, cy-75)
+    def to_output_canvas(local_overlay: Image.Image) -> Image.Image:
+        transparent = _place_panel_overlay(
+            local_overlay,
+            source_size,
+            panel_box,
+        )
+        scale = min(width / source_size[0], height / source_size[1])
+        size = (
+            max(1, round(source_size[0] * scale)),
+            max(1, round(source_size[1] * scale)),
+        )
+        resized = transparent.resize(size, Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        canvas.alpha_composite(
+            resized,
+            ((width - size[0]) // 2, (height - size[1]) // 2),
+        )
+        return canvas
 
-    kick_on = active.get("HX_SNOWMAN_DRUMMER_HIT_KICK", 0)
-    snare_on = active.get("HX_SNOWMAN_DRUMMER_HIT_SNARE", 0)
-    hihat_on = active.get("HX_SNOWMAN_DRUMMER_HIT_HI_HAT", 0)
-    tom_l_on = active.get("HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT", 0)
-    tom_r_on = active.get("HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT", 0)
-    floor_on = active.get("HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR", 0)
-    crash_l_on = active.get("HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT", 0)
-    crash_r_on = active.get("HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT", 0)
+    overlays: dict[str, Image.Image] = {}
+    for target, layer_id in LAYER_ID_BY_TARGET.items():
+        layer_spec = manifest_layers.get(layer_id)
+        if layer_spec is None:
+            raise FileNotFoundError(
+                f"Missing approved drummer layer spec for {target}: {layer_id}"
+            )
+        # Critical: manifest geometry is normalized to the black kit panel.
+        local_overlay = build_overlay(panel_size, layer_spec)
+        overlays[target] = to_output_canvas(local_overlay)
 
-    glow_box(kick, kick_on, "KICK")
-    glow_box(snare, snare_on, "SNARE")
-    glow_box(tom_l, tom_l_on, "TOM L")
-    glow_box(tom_r, tom_r_on, "TOM R")
-    glow_box(floor_tom, floor_on, "FLOOR")
-    glow_box(hi_hat, hihat_on, "HI-HAT")
-    glow_box(crash_l, crash_l_on, "CRASH L")
-    glow_box(crash_r, crash_r_on, "CRASH R")
+    downbeat_spec = manifest_layers.get(DOWNBEAT_LAYER_ID)
+    if downbeat_spec is None:
+        raise FileNotFoundError(
+            f"Missing approved drummer layer spec: {DOWNBEAT_LAYER_ID}"
+        )
+    overlays[DOWNBEAT_OVERLAY_KEY] = to_output_canvas(
+        build_overlay(panel_size, downbeat_spec)
+    )
+    return base, overlays
 
-    # Hi-hat is foot/pedal-driven: no stick reaches the hi-hat.
-    pedal_y = cy + 112
-    d.line((cx-164, cy+2, cx-164, pedal_y), fill=(130,145,165), width=3)
-    d.line((cx-178, pedal_y, cx-145, pedal_y), fill=(255, 245 if hihat_on else 180, 120 if hihat_on else 150), width=5)
-    if hihat_on > .02:
-        d.ellipse((cx-181, pedal_y-5, cx-142, pedal_y+5), outline=(255,230,130), width=3)
 
-    # Kick has no stick. Snare/toms/cymbals carry the active arm/stick.
-    left_hit = max(snare_on, tom_l_on, crash_l_on)
-    right_hit = max(tom_r_on, floor_on, crash_r_on)
-    left_target = (cx-125, cy-35-int(25*left_hit)) if crash_l_on >= max(snare_on, tom_l_on) else ((cx-55, cy+13) if tom_l_on >= snare_on else (cx-112, cy+52))
-    right_target = (cx+125, cy-35-int(25*right_hit)) if crash_r_on >= max(tom_r_on, floor_on) else ((cx+116, cy+57) if floor_on >= tom_r_on else (cx+8, cy+10))
-    d.line((cx-30, cy+5, left_target[0], left_target[1]), fill=(255,230,170), width=5)
-    d.line((cx+30, cy+5, right_target[0], right_target[1]), fill=(255,230,170), width=5)
+def _scaled_alpha(layer: Image.Image, intensity: float) -> Image.Image:
+    amount = max(0.0, min(1.0, float(intensity)))
+    if amount >= 0.999:
+        return layer
+    scaled = layer.copy()
+    alpha = scaled.getchannel("A")
+    alpha = alpha.point(lambda value: int(round(value * amount)))
+    scaled.putalpha(alpha)
+    return scaled
 
-    active_names = [TARGETS[k] for k,v in active.items() if v > .02 and k in TARGETS]
-    pose_names = []
-    for name, pose in sorted(((k,p) for s,e,k,p in []), key=lambda x:x[0]):
-        pose_names.append(POSE_NAMES.get(pose, pose))
 
-    d.rounded_rectangle((24, 20, width-24, 108), radius=14, fill=(8,12,20), outline=(95,115,145), width=2)
-    d.text((42, 36), "HELIX — REAL DRUMMER TARGETS", font=font, fill=(245,248,255))
-    d.text((42, 62), "ACTIVE: " + (", ".join(active_names) if active_names else "idle"), font=font, fill=(255,190,160))
-    d.text((42, 84), f"{t_ms/1000:.2f}s / {duration_ms/1000:.2f}s", font=font, fill=(185,205,230))
+def compose_drummer_frame(
+    base: Image.Image,
+    overlays: dict[str, Image.Image],
+    active: dict[str, float],
+) -> Image.Image:
+    """Composite approved hit layers over the immutable approved drummer art."""
+    frame = base.copy()
+    for target, intensity in active.items():
+        if intensity <= 0.02:
+            continue
+        overlay = overlays.get(target)
+        if overlay is None:
+            continue
+        frame.alpha_composite(_scaled_alpha(overlay, intensity))
 
-    # Target legend.
-    d.text((24, height-42), "XSQ target → composite: kick(no stick) • hi-hat(pedal) • 3 toms • snare/cymbals+arms/sticks", font=font, fill=(165,190,220))
-    return im
+    # The accepted placeholder-era behavior had a distinct downbeat-impact
+    # state. The injector adapts that state to simultaneous kick + snare +
+    # left crash using the current eight physical composites. When that
+    # signature is active, add the approved downbeat visual layer as well.
+    if all(active.get(component, 0.0) > 0.02 for component in DOWNBEAT_COMPONENTS):
+        intensity = max(active.get(component, 0.0) for component in DOWNBEAT_COMPONENTS)
+        overlay = overlays.get(DOWNBEAT_OVERLAY_KEY)
+        if overlay is not None:
+            frame.alpha_composite(_scaled_alpha(overlay, intensity))
 
+    return frame.convert("RGB")
 
 
 def _audio_duration_ms(audio: Path) -> int:
     ff = imageio_ffmpeg.get_ffmpeg_exe()
     proc = subprocess.run(
         [ff, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(audio)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if proc.returncode == 0:
         try:
@@ -156,13 +254,18 @@ def _audio_duration_ms(audio: Path) -> int:
                 return int(round(duration * 1000.0))
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             pass
+
     probe = subprocess.run([ff, "-i", str(audio)], capture_output=True, text=True)
     marker = "Duration: "
     for line in probe.stderr.splitlines():
         if marker in line:
             value = line.split(marker, 1)[1].split(",", 1)[0].strip()
             h, m, s = value.split(":")
-            return int(round((int(h) * 3600 + int(m) * 60 + float(s)) * 1000.0))
+            return int(
+                round(
+                    (int(h) * 3600 + int(m) * 60 + float(s)) * 1000.0
+                )
+            )
     raise RuntimeError(f"Unable to determine audio duration for {audio}")
 
 
@@ -172,42 +275,78 @@ def main() -> int:
     ap.add_argument("--audio", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--duration", type=float, default=0.0, help="Optional debug cap in seconds; default renders the entire audio.")
+    ap.add_argument(
+        "--duration",
+        type=float,
+        default=0.0,
+        help="Optional debug cap in seconds; default renders the entire audio.",
+    )
     args = ap.parse_args()
 
     effects = parse_effects(args.xsq)
     if not effects:
-        raise SystemExit("FAIL: no real HX_SNOWMAN_DRUMMER submodel effects found")
+        raise SystemExit("FAIL: no real HX_SNOWMAN_DRUMMER hit-composite effects found")
 
     audio_duration_ms = _audio_duration_ms(args.audio)
-    effect_end_ms = max(e[1] for e in effects)
+    effect_end_ms = max(effect[1] for effect in effects)
     if effect_end_ms < int(audio_duration_ms * 0.95):
         raise SystemExit(
-            f"FAIL: drummer XSQ ends at {effect_end_ms} ms, but repo audio is {audio_duration_ms} ms; "
-            "refusing to render a partial performance"
+            f"FAIL: drummer XSQ ends at {effect_end_ms} ms, but repo audio is "
+            f"{audio_duration_ms} ms; refusing to render a partial performance"
         )
-    duration_ms = audio_duration_ms if args.duration <= 0 else min(int(args.duration * 1000), audio_duration_ms)
-    if args.duration <= 0:
-        print(f"FULL-SONG MODE: audio_duration_ms={audio_duration_ms} effect_end_ms={effect_end_ms}")
+
+    duration_ms = (
+        audio_duration_ms
+        if args.duration <= 0
+        else min(int(args.duration * 1000), audio_duration_ms)
+    )
+    base, overlays = prepare_visual_assets(960, 540)
+
     out = args.output
     silent = out.with_suffix(".silent.mp4")
-    font = ImageFont.load_default()
-    writer = imageio.get_writer(silent, fps=args.fps, codec="libx264", quality=8, macro_block_size=None)
+    writer = imageio.get_writer(
+        silent,
+        fps=args.fps,
+        codec="libx264",
+        quality=8,
+        macro_block_size=None,
+    )
 
     try:
-        for i in range(int(duration_ms / 1000 * args.fps)):
-            t = int(i * 1000 / args.fps)
-            active = {name: 0.0 for name in TARGETS}
-            for start, end, name, _pose in effects:
-                if start <= t < end:
-                    active[name] = max(active[name], 1.0)
-            frame = draw_drummer(960, 540, active, t, duration_ms, font)
-            writer.append_data(np.asarray(frame))
+        frame_count = int(duration_ms / 1000 * args.fps)
+        for index in range(frame_count):
+            t_ms = int(index * 1000 / args.fps)
+            active = {name: 0.0 for name in LAYER_BY_TARGET}
+            for start, end, name, intensity in effects:
+                if start <= t_ms < end:
+                    active[name] = max(active[name], intensity)
+            writer.append_data(
+                np.asarray(compose_drummer_frame(base, overlays, active))
+            )
     finally:
         writer.close()
 
     ff = imageio_ffmpeg.get_ffmpeg_exe()
-    cmd = [ff, "-y", "-i", str(silent), "-i", str(args.audio), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", str(out)]
+    cmd = [
+        ff,
+        "-y",
+        "-i",
+        str(silent),
+        "-i",
+        str(args.audio),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(out),
+    ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(proc.stderr[-4000:])
@@ -215,7 +354,12 @@ def main() -> int:
 
     if not out.exists() or out.stat().st_size < 10000:
         raise SystemExit("FAIL: drummer MP4 missing/empty")
-    print(f"PASS: real drummer MP4 targets={len(TARGETS)} effects={len(effects)} duration_ms={duration_ms} audio_duration_ms={audio_duration_ms}")
+
+    print(
+        "PASS: approved drummer visual ground truth rendered "
+        f"targets={len(LAYER_BY_TARGET)} effects={len(effects)} "
+        f"duration_ms={duration_ms} audio_duration_ms={audio_duration_ms}"
+    )
     return 0
 
 
