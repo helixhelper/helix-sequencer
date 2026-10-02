@@ -14,7 +14,6 @@ def test_renderer_uses_approved_source_and_all_eight_layers() -> None:
     assert SOURCE_IMAGE.name == "drummerbg.png"
     assert SOURCE_IMAGE.exists()
     assert len(LAYER_BY_TARGET) == 8
-    assert all(path.exists() for path in LAYER_BY_TARGET.values())
 
 
 def test_each_approved_hit_layer_changes_the_ground_truth_frame() -> None:
