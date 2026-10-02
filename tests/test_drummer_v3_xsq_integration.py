@@ -3,7 +3,6 @@ from __future__ import annotations
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from audio.drum_classification import DrumEvent
@@ -80,7 +79,7 @@ def test_injection_helper_preserves_existing_xlights_effect_container() -> None:
     assert [e.get("name") for e in container.findall("Element")] == ["Existing"]
 
 
-def test_injector_uses_production_stem_analysis_path() -> None:
+def test_injector_uses_approved_direct_mix_behavior_oracle() -> None:
     from tools import integrate_drummer_v3_into_xsq as injector
 
     with tempfile.TemporaryDirectory() as tempdir:
@@ -93,19 +92,18 @@ def test_injector_uses_production_stem_analysis_path() -> None:
         audio.write_bytes(b"fake-audio")
 
         streams = {
-            "kick_events": [DrumEvent(0.1, 0.8, 0.9, {}, 1, "kick", source="demucs:drums")],
+            "kick_events": [DrumEvent(0.1, 0.8, 0.9, {}, 1, "kick", source="direct:mix:placeholder_v1_b27e8d7")],
             "snare_events": [],
             "tom_events": [],
             "hihat_events": [],
             "cymbal_events": [],
             "drum_bus_events": [],
         }
-        analysis = SimpleNamespace(
-            source="demucs",
-            stems={"drums": cache / "song" / "drums.wav"},
-            drum_event_streams=streams,
-        )
-        with mock.patch.object(injector, "build_stem_analysis", return_value=analysis) as build:
+        with mock.patch.object(
+            injector,
+            "detect_drum_event_streams_from_file_oracle",
+            return_value=streams,
+        ) as detect:
             report = injector.inject_drummer_v3(
                 base,
                 output,
@@ -113,10 +111,12 @@ def test_injector_uses_production_stem_analysis_path() -> None:
                 stem_cache_dir=cache,
             )
 
-        build.assert_called_once()
-        assert build.call_args.kwargs["audio_path"] == audio
-        assert build.call_args.kwargs["cache_dir"] == cache
-        assert report["stem_source"] == "demucs"
+        detect.assert_called_once()
+        assert detect.call_args.args[0] == audio
+        assert detect.call_args.kwargs["source_label"] == "direct:mix:placeholder_v1_b27e8d7"
+        assert report["stem_source"] == "direct_mix_behavior_oracle"
+        assert report["behavior_profile"] == "placeholder_v1_b27e8d7"
+        assert report["behavior_detector"] == "single_label_onset_oracle"
         assert report["detector_counts"]["kick_events"] == 1
         assert report["placement_count"] == 1
         tree = ET.parse(output)
