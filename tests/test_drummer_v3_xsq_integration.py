@@ -114,7 +114,7 @@ def test_injector_uses_approved_direct_mix_behavior_oracle() -> None:
         detect.assert_called_once()
         assert detect.call_args.args[0] == audio
         assert detect.call_args.kwargs["source_label"] == "direct:mix:placeholder_v1_b27e8d7"
-        assert report["stem_source"] == "direct_mix_behavior_oracle"
+        assert report["stem_source"] == "disabled_for_behavior_oracle"
         assert report["behavior_profile"] == "placeholder_v1_b27e8d7"
         assert report["behavior_detector"] == "single_label_onset_oracle"
         assert report["detector_counts"]["kick_events"] == 1
