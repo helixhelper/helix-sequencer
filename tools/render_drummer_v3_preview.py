@@ -12,9 +12,12 @@ import imageio_ffmpeg
 import numpy as np
 from PIL import Image
 
+from tools.build_drummer_v3_png_layers import build_overlay, load_manifest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_IMAGE = ROOT / "fixtures" / "band_geometry" / "source" / "drummerbg.png"
+LAYER_MANIFEST = ROOT / "fixtures" / "band_geometry" / "drummer_v3_png_layer_manifest.json"
 
 LAYER_BY_TARGET = {
     "HX_SNOWMAN_DRUMMER_HIT_KICK": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_kick.png",
@@ -25,6 +28,17 @@ LAYER_BY_TARGET = {
     "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_floor_tom.png",
     "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_left_crash.png",
     "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": ROOT / "fixtures" / "band_geometry" / "layers" / "drummer_hit_right_crash.png",
+}
+
+LAYER_ID_BY_TARGET = {
+    "HX_SNOWMAN_DRUMMER_HIT_KICK": "kick_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE": "snare_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_HI_HAT": "hi_hat_pulse",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_LEFT": "left_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_RIGHT": "right_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_TOM_FLOOR": "floor_tom_hit",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT": "left_crash",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": "right_crash",
 }
 
 
@@ -85,30 +99,46 @@ def prepare_visual_assets(
         source_size = source_rgba.size
         base = _fit_on_canvas(source_rgba, width, height)
 
+    manifest = load_manifest(LAYER_MANIFEST)
+    manifest_layers = {
+        str(layer["id"]): layer
+        for layer in manifest.get("layers", [])
+        if isinstance(layer, dict) and layer.get("id")
+    }
+
     overlays: dict[str, Image.Image] = {}
     for target, path in LAYER_BY_TARGET.items():
-        if not path.exists():
-            raise FileNotFoundError(f"Missing approved drummer hit layer for {target}: {path}")
-        with Image.open(path) as layer:
-            rgba = layer.convert("RGBA")
-            if rgba.size != source_size:
-                raise ValueError(
-                    f"Drummer layer size mismatch for {target}: {rgba.size} != {source_size}"
+        if path.exists():
+            with Image.open(path) as layer:
+                transparent = layer.convert("RGBA")
+        else:
+            # The visual contract is the manifest, not the presence of a
+            # generated PNG. Rebuild a missing approved layer deterministically
+            # from its authored manifest commands.
+            layer_id = LAYER_ID_BY_TARGET[target]
+            layer_spec = manifest_layers.get(layer_id)
+            if layer_spec is None:
+                raise FileNotFoundError(
+                    f"Missing approved drummer layer spec for {target}: {layer_id}"
                 )
-            transparent = Image.new("RGBA", source_size, (0, 0, 0, 0))
-            transparent.alpha_composite(rgba)
-            scale = min(width / source_size[0], height / source_size[1])
-            size = (
-                max(1, round(source_size[0] * scale)),
-                max(1, round(source_size[1] * scale)),
+            transparent = build_overlay(source_size, layer_spec)
+
+        if transparent.size != source_size:
+            raise ValueError(
+                f"Drummer layer size mismatch for {target}: {transparent.size} != {source_size}"
             )
-            resized = transparent.resize(size, Image.Resampling.LANCZOS)
-            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            canvas.alpha_composite(
-                resized,
-                ((width - size[0]) // 2, (height - size[1]) // 2),
-            )
-            overlays[target] = canvas
+        scale = min(width / source_size[0], height / source_size[1])
+        size = (
+            max(1, round(source_size[0] * scale)),
+            max(1, round(source_size[1] * scale)),
+        )
+        resized = transparent.resize(size, Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        canvas.alpha_composite(
+            resized,
+            ((width - size[0]) // 2, (height - size[1]) // 2),
+        )
+        overlays[target] = canvas
     return base, overlays
 
 
