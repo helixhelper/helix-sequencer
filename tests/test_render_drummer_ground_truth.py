@@ -3,6 +3,8 @@ from __future__ import annotations
 from PIL import ImageChops
 
 from tools.render_drummer_v3_preview import (
+    DOWNBEAT_COMPONENTS,
+    DOWNBEAT_OVERLAY_KEY,
     LAYER_BY_TARGET,
     SOURCE_IMAGE,
     compose_drummer_frame,
@@ -19,7 +21,8 @@ def test_renderer_uses_approved_source_and_all_eight_layers() -> None:
 def test_each_approved_hit_layer_changes_the_ground_truth_frame() -> None:
     base, overlays = prepare_visual_assets(320, 180)
     assert base.getbbox() is not None
-    assert set(overlays) == set(LAYER_BY_TARGET)
+    assert set(LAYER_BY_TARGET) <= set(overlays)
+    assert DOWNBEAT_OVERLAY_KEY in overlays
 
     base_rgb = base.convert("RGB")
     for target in LAYER_BY_TARGET:
@@ -30,3 +33,12 @@ def test_each_approved_hit_layer_changes_the_ground_truth_frame() -> None:
         )
         diff = ImageChops.difference(base_rgb, frame)
         assert diff.getbbox() is not None, target
+
+
+def test_downbeat_signature_adds_approved_impact_overlay() -> None:
+    base, overlays = prepare_visual_assets(320, 180)
+    active = {name: 0.0 for name in LAYER_BY_TARGET}
+    for component in DOWNBEAT_COMPONENTS:
+        active[component] = 1.0
+    frame = compose_drummer_frame(base, overlays, active)
+    assert ImageChops.difference(base.convert("RGB"), frame).getbbox() is not None
