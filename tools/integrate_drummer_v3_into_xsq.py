@@ -6,7 +6,6 @@ import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from core.audio_intelligence import build_stem_analysis
 from audio.drum_detection_oracle import (\n    APPROVED_DRUMMER_BEHAVIOR_PROFILE,\n    detect_drum_event_streams_from_file_oracle,\n)\nfrom mapping.drum_mapper import DRUMMER_COMPONENTS, map_events_to_drummer_components, resolve_drum_streams\n
 DRUMMER_V3_MODEL = "HX_SNOWMAN_DRUMMER"
 DRUMMER_TARGETS = set(DRUMMER_COMPONENTS)
@@ -101,9 +100,9 @@ def inject_drummer_v3(
         "model": DRUMMER_V3_MODEL, "base_xsq": str(base_xsq),
         "output_xsq": str(output_xsq), "audio": str(audio_path),
         "layer": layer_name, "fallback_mode": resolved["fallback_mode"],
-        "stem_source": stem_analysis.source,
+        "stem_source": "direct_mix_behavior_oracle",
         "stem_cache_dir": str(cache_dir),
-        "stems": {name: str(path) for name, path in sorted(stem_analysis.stems.items())},
+        "stems": {},
         "detector_counts": dict(resolved.get("counts", {})),
         "event_count": len(component_events), "placement_count": placements,
         "component_counts": {component: sum(1 for event in component_events if event["component"] == component) for component in sorted(DRUMMER_TARGETS)},
