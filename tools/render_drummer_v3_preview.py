@@ -41,6 +41,14 @@ LAYER_ID_BY_TARGET = {
     "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_RIGHT": "right_crash",
 }
 
+DOWNBEAT_OVERLAY_KEY = "__DOWNBEAT_IMPACT__"
+DOWNBEAT_LAYER_ID = "downbeat_impact"
+DOWNBEAT_COMPONENTS = (
+    "HX_SNOWMAN_DRUMMER_HIT_KICK",
+    "HX_SNOWMAN_DRUMMER_HIT_SNARE",
+    "HX_SNOWMAN_DRUMMER_HIT_CYMBAL_LEFT",
+)
+
 
 def _effect_intensity(settings: str) -> float:
     match = re.search(r"E_SLIDER_Brightness=([0-9.]+)", settings or "")
@@ -139,6 +147,25 @@ def prepare_visual_assets(
             ((width - size[0]) // 2, (height - size[1]) // 2),
         )
         overlays[target] = canvas
+
+    downbeat_spec = manifest_layers.get(DOWNBEAT_LAYER_ID)
+    if downbeat_spec is None:
+        raise FileNotFoundError(
+            f"Missing approved drummer layer spec: {DOWNBEAT_LAYER_ID}"
+        )
+    downbeat = build_overlay(source_size, downbeat_spec)
+    scale = min(width / source_size[0], height / source_size[1])
+    size = (
+        max(1, round(source_size[0] * scale)),
+        max(1, round(source_size[1] * scale)),
+    )
+    resized = downbeat.resize(size, Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    canvas.alpha_composite(
+        resized,
+        ((width - size[0]) // 2, (height - size[1]) // 2),
+    )
+    overlays[DOWNBEAT_OVERLAY_KEY] = canvas
     return base, overlays
 
 
@@ -167,6 +194,17 @@ def compose_drummer_frame(
         if overlay is None:
             continue
         frame.alpha_composite(_scaled_alpha(overlay, intensity))
+
+    # The accepted placeholder-era behavior had a distinct downbeat-impact
+    # state. The injector adapts that state to simultaneous kick + snare +
+    # left crash using the current eight physical composites. When that
+    # signature is active, add the approved downbeat visual layer as well.
+    if all(active.get(component, 0.0) > 0.02 for component in DOWNBEAT_COMPONENTS):
+        intensity = max(active.get(component, 0.0) for component in DOWNBEAT_COMPONENTS)
+        overlay = overlays.get(DOWNBEAT_OVERLAY_KEY)
+        if overlay is not None:
+            frame.alpha_composite(_scaled_alpha(overlay, intensity))
+
     return frame.convert("RGB")
 
 
