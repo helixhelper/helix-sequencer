@@ -50,6 +50,46 @@ DOWNBEAT_COMPONENTS = (
 )
 
 
+def _detect_kit_panel(source: Image.Image) -> tuple[int, int, int, int]:
+    """Locate the dark xLights/drummer panel inside the approved reference.
+
+    The approved source includes gray page/canvas margins around the actual
+    black model panel. The authored normalized hit coordinates are relative to
+    that black panel, not to the outer reference image.
+    """
+    rgb = np.asarray(source.convert("RGB"), dtype=np.float32)
+    luminance = rgb.mean(axis=2)
+    dark = luminance < 90.0
+    row_fraction = dark.mean(axis=1)
+    col_fraction = dark.mean(axis=0)
+    rows = np.flatnonzero(row_fraction > 0.15)
+    cols = np.flatnonzero(col_fraction > 0.15)
+    if rows.size == 0 or cols.size == 0:
+        raise ValueError("Unable to locate dark drummer panel in approved source image")
+    x0, x1 = int(cols[0]), int(cols[-1]) + 1
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    if (x1 - x0) < source.width * 0.25 or (y1 - y0) < source.height * 0.25:
+        raise ValueError(
+            f"Detected drummer panel is implausibly small: {(x0, y0, x1, y1)}"
+        )
+    return x0, y0, x1, y1
+
+
+def _place_panel_overlay(
+    local_overlay: Image.Image,
+    source_size: tuple[int, int],
+    panel_box: tuple[int, int, int, int],
+) -> Image.Image:
+    x0, y0, x1, y1 = panel_box
+    panel_size = (x1 - x0, y1 - y0)
+    overlay = local_overlay.convert("RGBA")
+    if overlay.size != panel_size:
+        overlay = overlay.resize(panel_size, Image.Resampling.LANCZOS)
+    full = Image.new("RGBA", source_size, (0, 0, 0, 0))
+    full.alpha_composite(overlay, (x0, y0))
+    return full
+
+
 def _effect_intensity(settings: str) -> float:
     match = re.search(r"E_SLIDER_Brightness=([0-9.]+)", settings or "")
     if not match:
@@ -105,6 +145,11 @@ def prepare_visual_assets(
     with Image.open(SOURCE_IMAGE) as source:
         source_rgba = source.convert("RGBA")
         source_size = source_rgba.size
+        panel_box = _detect_kit_panel(source_rgba)
+        panel_size = (
+            panel_box[2] - panel_box[0],
+            panel_box[3] - panel_box[1],
+        )
         base = _fit_on_canvas(source_rgba, width, height)
 
     manifest = load_manifest(LAYER_MANIFEST)
@@ -114,27 +159,12 @@ def prepare_visual_assets(
         if isinstance(layer, dict) and layer.get("id")
     }
 
-    overlays: dict[str, Image.Image] = {}
-    for target, path in LAYER_BY_TARGET.items():
-        if path.exists():
-            with Image.open(path) as layer:
-                transparent = layer.convert("RGBA")
-        else:
-            # The visual contract is the manifest, not the presence of a
-            # generated PNG. Rebuild a missing approved layer deterministically
-            # from its authored manifest commands.
-            layer_id = LAYER_ID_BY_TARGET[target]
-            layer_spec = manifest_layers.get(layer_id)
-            if layer_spec is None:
-                raise FileNotFoundError(
-                    f"Missing approved drummer layer spec for {target}: {layer_id}"
-                )
-            transparent = build_overlay(source_size, layer_spec)
-
-        if transparent.size != source_size:
-            raise ValueError(
-                f"Drummer layer size mismatch for {target}: {transparent.size} != {source_size}"
-            )
+    def to_output_canvas(local_overlay: Image.Image) -> Image.Image:
+        transparent = _place_panel_overlay(
+            local_overlay,
+            source_size,
+            panel_box,
+        )
         scale = min(width / source_size[0], height / source_size[1])
         size = (
             max(1, round(source_size[0] * scale)),
@@ -146,26 +176,27 @@ def prepare_visual_assets(
             resized,
             ((width - size[0]) // 2, (height - size[1]) // 2),
         )
-        overlays[target] = canvas
+        return canvas
+
+    overlays: dict[str, Image.Image] = {}
+    for target, layer_id in LAYER_ID_BY_TARGET.items():
+        layer_spec = manifest_layers.get(layer_id)
+        if layer_spec is None:
+            raise FileNotFoundError(
+                f"Missing approved drummer layer spec for {target}: {layer_id}"
+            )
+        # Critical: manifest geometry is normalized to the black kit panel.
+        local_overlay = build_overlay(panel_size, layer_spec)
+        overlays[target] = to_output_canvas(local_overlay)
 
     downbeat_spec = manifest_layers.get(DOWNBEAT_LAYER_ID)
     if downbeat_spec is None:
         raise FileNotFoundError(
             f"Missing approved drummer layer spec: {DOWNBEAT_LAYER_ID}"
         )
-    downbeat = build_overlay(source_size, downbeat_spec)
-    scale = min(width / source_size[0], height / source_size[1])
-    size = (
-        max(1, round(source_size[0] * scale)),
-        max(1, round(source_size[1] * scale)),
+    overlays[DOWNBEAT_OVERLAY_KEY] = to_output_canvas(
+        build_overlay(panel_size, downbeat_spec)
     )
-    resized = downbeat.resize(size, Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    canvas.alpha_composite(
-        resized,
-        ((width - size[0]) // 2, (height - size[1]) // 2),
-    )
-    overlays[DOWNBEAT_OVERLAY_KEY] = canvas
     return base, overlays
 
 
