@@ -82,6 +82,25 @@ jobs:
           xsq=$(find test_runs/full_current/base256 -type f -name '*.xsq' | head -n 1)
           test -n "$xsq"
           python tools/integrate_drummer_v3_into_xsq.py             "$xsq"             'Helix Audiolights.mp3'             --stem-cache test_runs/stem_cache             --output test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.xsq             --report test_runs/full_current/drummer_run_report.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('test_runs/full_current/drummer_run_report.json').read_text())
+          expected = {
+              'kick_events': 193,
+              'snare_events': 37,
+              'tom_events': 9,
+              'hihat_events': 205,
+              'cymbal_events': 824,
+              'drum_bus_events': 47,
+          }
+          assert report['behavior_profile'] == 'placeholder_v1_b27e8d7', report
+          assert report['behavior_audio_source'] == 'original_mix', report
+          assert report['behavior_event_count'] == 1315, report
+          assert report['detector_counts'] == expected, report
+          assert report['downbeat_impact_count'] == 47, report
+          print('DRUMMER ORACLE MATCH:', report['behavior_event_count'], report['detector_counts'])
+          PY
       - name: Validate XSQ
         env: {PYTHONPATH: .}
         run: python tools/validate_xsq_structure.py test_runs/full_current/LightsOutTheme_FULL_256_PLUS_DRUMMER_CURRENT.xsq
